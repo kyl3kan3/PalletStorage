@@ -1,9 +1,11 @@
 import { z } from "zod";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
-import { orderPicksSShape, parseAisleBay } from "@wms/core";
-import { router, tenantProcedure } from "../trpc";
+import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay } from "@wms/core";
+import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+import { assertOutboundTransition, type OutboundStatus } from "./_stateMachine";
 
 export const outboundRouter = router({
   list: tenantProcedure
@@ -65,6 +67,24 @@ export const outboundRouter = router({
       });
     }),
 
+  /** Detail view with lines, for the web dashboard. */
+  byId: tenantProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const [order] = await ctx.db
+        .select()
+        .from(schema.outboundOrders)
+        .where(and(eq(schema.outboundOrders.id, input.id), eq(schema.outboundOrders.organizationId, orgId)))
+        .limit(1);
+      if (!order) return null;
+      const lines = await ctx.db
+        .select()
+        .from(schema.outboundLines)
+        .where(eq(schema.outboundLines.outboundOrderId, order.id));
+      return { order, lines };
+    }),
+
   /**
    * Allocate stock to an order: for each outbound line, find pallets holding
    * that product and create `picks` rows ordered along an S-shape path.
@@ -74,6 +94,24 @@ export const outboundRouter = router({
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
       return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.outboundOrders)
+          .where(
+            and(
+              eq(schema.outboundOrders.id, input.outboundOrderId),
+              eq(schema.outboundOrders.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        if (order.status !== "open" && order.status !== "draft") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Cannot generate picks for order in status '${order.status}'`,
+          });
+        }
+
         const lines = await tx
           .select()
           .from(schema.outboundLines)
@@ -96,10 +134,13 @@ export const outboundRouter = router({
         for (const line of lines) {
           const stock = await tx
             .select({
+              palletItemId: schema.palletItems.id,
               palletId: schema.pallets.id,
               qty: schema.palletItems.qty,
+              expiry: schema.palletItems.expiry,
               locationId: schema.pallets.currentLocationId,
               path: schema.locations.path,
+              palletCreatedAt: schema.pallets.createdAt,
             })
             .from(schema.palletItems)
             .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
@@ -112,19 +153,31 @@ export const outboundRouter = router({
               ),
             );
 
-          let remaining = line.qtyOrdered - line.qtyPicked;
-          for (const s of stock) {
-            if (remaining <= 0) break;
-            if (!s.locationId) continue;
-            const take = Math.min(remaining, s.qty);
+          // FEFO (with FIFO fallback by pallet.createdAt when no expiry set).
+          const remaining = line.qtyOrdered - line.qtyPicked;
+          const allocations = allocate(
+            remaining,
+            stock
+              .filter((s) => s.locationId != null)
+              .map((s) => ({
+                key: s.palletItemId,
+                qty: s.qty,
+                expiry: s.expiry ?? null,
+                receivedAt: s.palletCreatedAt ?? null,
+                _source: s,
+              })),
+            "fefo",
+          );
+
+          for (const a of allocations) {
+            const s = a.candidate._source;
             candidates.push({
               outboundLineId: line.id,
               palletId: s.palletId,
-              fromLocationId: s.locationId,
-              qty: take,
+              fromLocationId: s.locationId!,
+              qty: a.take,
               path: s.path,
             });
-            remaining -= take;
           }
         }
 
@@ -212,6 +265,204 @@ export const outboundRouter = router({
           .set({ qtyPicked: sql`${schema.outboundLines.qtyPicked} + ${pick.qty}` })
           .where(eq(schema.outboundLines.id, pick.outboundLineId));
 
+        return { ok: true };
+      });
+    }),
+
+  /**
+   * Confirm all picks are complete and the order is staged for shipping.
+   * Requires every line to be fully picked. Transitions picking → packed.
+   */
+  pack: tenantProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.outboundOrders)
+          .where(and(eq(schema.outboundOrders.id, input.id), eq(schema.outboundOrders.organizationId, orgId)))
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        assertOutboundTransition(order.status as OutboundStatus, "packed");
+
+        const lines = await tx
+          .select()
+          .from(schema.outboundLines)
+          .where(eq(schema.outboundLines.outboundOrderId, order.id));
+        const shortLines = lines.filter((l) => l.qtyPicked < l.qtyOrdered);
+        if (shortLines.length > 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Cannot pack: ${shortLines.length} line(s) still need picking`,
+          });
+        }
+
+        await tx
+          .update(schema.outboundOrders)
+          .set({ status: "packed", packedAt: new Date() })
+          .where(eq(schema.outboundOrders.id, order.id));
+        return { ok: true };
+      });
+    }),
+
+  /**
+   * Ship confirm. Generates a BOL number, flips every picked pallet on
+   * the order to 'shipped', emits ship movements for the ledger, and
+   * returns the shipment row (caller uses its id to download the BOL PDF).
+   */
+  ship: managerProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        carrier: z.string().trim().max(120).optional(),
+        trackingNumber: z.string().trim().max(120).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.outboundOrders)
+          .where(and(eq(schema.outboundOrders.id, input.id), eq(schema.outboundOrders.organizationId, orgId)))
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        assertOutboundTransition(order.status as OutboundStatus, "shipped");
+
+        const [userRow] = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.clerkUserId, ctx.userId))
+          .limit(1);
+
+        const bolNumber = generateBolNumber();
+        const [shipment] = await tx
+          .insert(schema.shipments)
+          .values({
+            organizationId: orgId,
+            outboundOrderId: order.id,
+            bolNumber,
+            carrier: input.carrier,
+            trackingNumber: input.trackingNumber,
+            shippedByUserId: userRow?.id ?? null,
+          })
+          .returning();
+
+        // All pallets touched by this order's completed picks need to
+        // flip to 'shipped' and get a ship movement in the ledger.
+        const palletRows = await tx
+          .selectDistinct({ palletId: schema.picks.palletId, fromLocationId: schema.picks.fromLocationId })
+          .from(schema.picks)
+          .innerJoin(
+            schema.outboundLines,
+            eq(schema.outboundLines.id, schema.picks.outboundLineId),
+          )
+          .where(
+            and(
+              eq(schema.outboundLines.outboundOrderId, order.id),
+              isNotNull(schema.picks.palletId),
+              isNotNull(schema.picks.completedAt),
+            ),
+          );
+
+        for (const p of palletRows) {
+          if (!p.palletId) continue;
+          await tx.insert(schema.movements).values({
+            organizationId: orgId,
+            palletId: p.palletId,
+            fromLocationId: p.fromLocationId,
+            toLocationId: null,
+            reason: "ship",
+            userId: userRow?.id ?? null,
+            refType: "outbound_order",
+            refId: order.id,
+          });
+          await tx
+            .update(schema.pallets)
+            .set({ status: "shipped", currentLocationId: null })
+            .where(eq(schema.pallets.id, p.palletId));
+        }
+
+        await tx
+          .update(schema.outboundOrders)
+          .set({ status: "shipped", shippedAt: new Date() })
+          .where(eq(schema.outboundOrders.id, order.id));
+
+        return { ok: true, shipment };
+      });
+    }),
+
+  /** List shipments for an order (for BOL download + history). */
+  shipments: tenantProcedure
+    .input(z.object({ outboundOrderId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db
+        .select()
+        .from(schema.shipments)
+        .where(
+          and(
+            eq(schema.shipments.organizationId, orgId),
+            eq(schema.shipments.outboundOrderId, input.outboundOrderId),
+          ),
+        );
+    }),
+
+  /**
+   * Cancel an outbound order. Only allowed before any pick has been
+   * completed — once stock is committed out of its location we require a
+   * manual reversal, not a simple cancel.
+   */
+  cancel: managerProcedure
+    .input(z.object({ id: z.string().uuid(), reason: z.string().trim().max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.outboundOrders)
+          .where(and(eq(schema.outboundOrders.id, input.id), eq(schema.outboundOrders.organizationId, orgId)))
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        assertOutboundTransition(order.status as OutboundStatus, "cancelled");
+
+        const completed = await tx
+          .select({ id: schema.picks.id })
+          .from(schema.picks)
+          .innerJoin(
+            schema.outboundLines,
+            eq(schema.outboundLines.id, schema.picks.outboundLineId),
+          )
+          .where(
+            and(
+              eq(schema.outboundLines.outboundOrderId, order.id),
+              isNotNull(schema.picks.completedAt),
+            ),
+          )
+          .limit(1);
+        if (completed.length > 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Cannot cancel: picks have already been completed. Return stock to rack first.",
+          });
+        }
+
+        // Discard any pending (uncompleted) picks alongside the cancel.
+        await tx
+          .delete(schema.picks)
+          .where(
+            and(
+              eq(schema.picks.organizationId, orgId),
+              isNull(schema.picks.completedAt),
+              sql`${schema.picks.outboundLineId} in (select id from ${schema.outboundLines} where outbound_order_id = ${order.id})`,
+            ),
+          );
+
+        await tx
+          .update(schema.outboundOrders)
+          .set({ status: "cancelled", cancelledAt: new Date(), cancelReason: input.reason })
+          .where(eq(schema.outboundOrders.id, order.id));
         return { ok: true };
       });
     }),

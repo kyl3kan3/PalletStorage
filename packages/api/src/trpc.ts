@@ -1,7 +1,9 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
+import { randomUUID } from "node:crypto";
 import type { Db } from "@wms/db";
+import { rateLimit } from "./rateLimit";
 
 export interface CreateContextOptions {
   db: Db;
@@ -10,10 +12,12 @@ export interface CreateContextOptions {
   /** Clerk org id for the active tenant. */
   orgId: string | null;
   role: "admin" | "manager" | "operator" | null;
+  /** Request correlation id (propagated to logs). */
+  traceId?: string;
 }
 
 export async function createTRPCContext(opts: CreateContextOptions) {
-  return opts;
+  return { ...opts, traceId: opts.traceId ?? randomUUID() };
 }
 export type Context = Awaited<ReturnType<typeof createTRPCContext>>;
 
@@ -36,6 +40,9 @@ export const publicProcedure = t.procedure;
 /** Authenticated: requires a signed-in user. */
 export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   if (!ctx.userId) throw new TRPCError({ code: "UNAUTHORIZED" });
+  // Per-user rate limit as a blast-radius guard. Stricter limits belong
+  // on specific mutations (e.g. QuickBooks export) via their own guards.
+  rateLimit(`user:${ctx.userId}`, { max: 600, windowMs: 60_000 });
   return next({ ctx: { ...ctx, userId: ctx.userId } });
 });
 
@@ -43,6 +50,14 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
 export const tenantProcedure = authedProcedure.use(({ ctx, next }) => {
   if (!ctx.orgId) throw new TRPCError({ code: "FORBIDDEN", message: "No active organization" });
   return next({ ctx: { ...ctx, orgId: ctx.orgId } });
+});
+
+/** Manager or admin — gate for sign-off actions (close, approve). */
+export const managerProcedure = tenantProcedure.use(({ ctx, next }) => {
+  if (ctx.role !== "admin" && ctx.role !== "manager") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Manager or admin role required" });
+  }
+  return next();
 });
 
 /** Admin-only. */

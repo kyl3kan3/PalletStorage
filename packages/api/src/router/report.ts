@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, count, countDistinct, eq, gte, sql, sum } from "drizzle-orm";
+import { and, asc, count, countDistinct, eq, gte, isNotNull, lte, sql, sum } from "drizzle-orm";
 import { schema } from "@wms/db";
 import { router, tenantProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
@@ -102,6 +102,43 @@ export const reportRouter = router({
         order by 1 asc
       `);
       return rows as unknown as Array<{ day: string; reason: string; n: number }>;
+    }),
+
+  /**
+   * Pallet items whose expiry falls within the next `days` window, sorted
+   * soonest first. Intended for the "expiring stock" dashboard card so
+   * operators can proactively move, discount, or dispose of at-risk stock.
+   */
+  expiringStock: tenantProcedure
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30) }).default({}))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const cutoff = new Date(Date.now() + input.days * 24 * 3600 * 1000);
+      return ctx.db
+        .select({
+          palletItemId: schema.palletItems.id,
+          palletId: schema.pallets.id,
+          lpn: schema.pallets.lpn,
+          sku: schema.products.sku,
+          productName: schema.products.name,
+          qty: schema.palletItems.qty,
+          lot: schema.palletItems.lot,
+          expiry: schema.palletItems.expiry,
+          locationPath: schema.locations.path,
+        })
+        .from(schema.palletItems)
+        .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+        .innerJoin(schema.products, eq(schema.products.id, schema.palletItems.productId))
+        .leftJoin(schema.locations, eq(schema.locations.id, schema.pallets.currentLocationId))
+        .where(
+          and(
+            eq(schema.palletItems.organizationId, orgId),
+            eq(schema.pallets.status, "stored"),
+            isNotNull(schema.palletItems.expiry),
+            lte(schema.palletItems.expiry, cutoff),
+          ),
+        )
+        .orderBy(asc(schema.palletItems.expiry));
     }),
 
   /** Top-level counters for the dashboard hero strip. */

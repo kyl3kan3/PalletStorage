@@ -10,6 +10,7 @@ import { movementRouter } from "./router/movement";
 import { scanRouter } from "./router/scan";
 import { quickbooksRouter } from "./router/quickbooks";
 import { reportRouter } from "./router/report";
+import { cycleCountRouter } from "./router/cycleCount";
 
 export const appRouter = router({
   organization: organizationRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   scan: scanRouter,
   quickbooks: quickbooksRouter,
   report: reportRouter,
+  cycleCount: cycleCountRouter,
 });
 
 export type AppRouter = typeof appRouter;
