@@ -46,6 +46,14 @@ export const movementReason = pgEnum("movement_reason", [
   "cycle_count",
 ]);
 export const labelKind = pgEnum("label_kind", ["pallet", "location"]);
+export const cycleCountStatus = pgEnum("cycle_count_status", [
+  "draft",
+  "open",
+  "counting",
+  "reviewing",
+  "closed",
+  "cancelled",
+]);
 
 // ──────────────────────────────────────────────────────────────────────
 // Tenancy
@@ -228,6 +236,10 @@ export const inboundOrders = pgTable(
     status: inboundStatus("status").notNull().default("draft"),
     expectedAt: timestamp("expected_at", { withTimezone: true }),
     receivedAt: timestamp("received_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closedByUserId: uuid("closed_by_user_id").references(() => users.id),
+    // Populated when a manager short-closes an order with under-received lines.
+    closeReason: text("close_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -268,6 +280,9 @@ export const outboundOrders = pgTable(
     status: outboundStatus("status").notNull().default("draft"),
     shipBy: timestamp("ship_by", { withTimezone: true }),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
+    packedAt: timestamp("packed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -313,6 +328,35 @@ export const picks = pgTable(
   }),
 );
 
+/**
+ * Shipments: one row per ship-confirm on an outbound order. Carries the
+ * Bill Of Lading number (printed on the BOL PDF) and the carrier metadata.
+ * We allow multiple shipments per order to support partial-ship workflows
+ * down the line, but for v1 there's exactly one.
+ */
+export const shipments = pgTable(
+  "shipments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    outboundOrderId: uuid("outbound_order_id")
+      .notNull()
+      .references(() => outboundOrders.id, { onDelete: "cascade" }),
+    bolNumber: text("bol_number").notNull(),
+    carrier: text("carrier"),
+    trackingNumber: text("tracking_number"),
+    shippedAt: timestamp("shipped_at", { withTimezone: true }).notNull().defaultNow(),
+    shippedByUserId: uuid("shipped_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orgBolUq: uniqueIndex("shipments_org_bol_uq").on(t.organizationId, t.bolNumber),
+    orgOrderIdx: index("shipments_org_order_idx").on(t.organizationId, t.outboundOrderId),
+  }),
+);
+
 // ──────────────────────────────────────────────────────────────────────
 // Movements (audit ledger — source of truth)
 // ──────────────────────────────────────────────────────────────────────
@@ -338,6 +382,67 @@ export const movements = pgTable(
   (t) => ({
     palletIdx: index("movements_pallet_idx").on(t.palletId),
     orgCreatedIdx: index("movements_org_created_idx").on(t.organizationId, t.createdAt),
+  }),
+);
+
+// ──────────────────────────────────────────────────────────────────────
+// Cycle counts (stock takes) — task-driven variance + approval
+// ──────────────────────────────────────────────────────────────────────
+/**
+ * A cycle count task: scoped to a single location for v1 (product/full
+ * warehouse scope can be added later). The count progresses through
+ * draft → open → counting → reviewing → closed. Closing a count with
+ * variance produces movement rows with reason='cycle_count' so the audit
+ * trail mirrors how other stock changes are recorded.
+ */
+export const cycleCounts = pgTable(
+  "cycle_counts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    status: cycleCountStatus("status").notNull().default("open"),
+    assignedUserId: uuid("assigned_user_id").references(() => users.id),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orgIdx: index("cycle_counts_org_idx").on(t.organizationId),
+    statusIdx: index("cycle_counts_status_idx").on(t.organizationId, t.status),
+  }),
+);
+
+export const cycleCountLines = pgTable(
+  "cycle_count_lines",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    cycleCountId: uuid("cycle_count_id")
+      .notNull()
+      .references(() => cycleCounts.id, { onDelete: "cascade" }),
+    // palletItem at the moment the count was opened — the variance is
+    // computed against its qty at that snapshot, not the current qty.
+    palletItemId: uuid("pallet_item_id")
+      .notNull()
+      .references(() => palletItems.id, { onDelete: "cascade" }),
+    expectedQty: integer("expected_qty").notNull(),
+    countedQty: integer("counted_qty"),
+    notes: text("notes"),
+  },
+  (t) => ({
+    cycleCountIdx: index("cycle_count_lines_cc_idx").on(t.cycleCountId),
   }),
 );
 

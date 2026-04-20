@@ -35,8 +35,11 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
-      - name: Unit tests
+      - name: Unit tests (core)
         run: pnpm --filter @wms/core test
+
+      - name: Unit tests (api — pure, no testcontainers)
+        run: pnpm --filter @wms/api exec vitest run src/stateMachine.test.ts src/rateLimit.test.ts
 
       - name: Build web
         run: pnpm --filter @wms/web build
