@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "WMS",
+    "slug": "wms-mobile",
+    "scheme": "wms",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.wms.mobile" },
+    "android": { "package": "com.wms.mobile" },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        { "cameraPermission": "Allow WMS to access your camera to scan pallet labels." }
+      ]
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@wms/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "mobile",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@wms/mobile", "dev"],
+      "port": 8081
+    },
+    {
+      "name": "drizzle-studio",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@wms/db", "db:studio"],
+      "port": 4983
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+# --- Node / pnpm ---
+node_modules/
+.pnpm-store/
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Build outputs ---
+dist/
+build/
+out/
+*.tsbuildinfo
+.next/
+.turbo/
+.expo/
+.expo-shared/
+web-build/
+
+# --- Environment ---
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- Editor / OS ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- Logs / coverage ---
+logs/
+*.log
+coverage/
+.nyc_output/
+*.lcov
+
+# --- Testing ---
+.vitest/
+__snapshots__/
+
+# --- Drizzle ---
+# migrations are tracked; drizzle-kit scratch is not
+drizzle/
+.drizzle/
+
+# --- Expo / React Native ---
+*.apk
+*.aab
+*.ipa
+.gradle/
+android/build/
+android/app/build/
+ios/build/
+ios/Pods/
+ios/Podfile.lock
+
+# --- Next ---
+next-env.d.ts
+.vercel
+.netlify
+
+# --- Sentry / auth / other secrets ---
+.sentryclirc
+.clerk/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Misc ---
+.cache/
+.parcel-cache/
+*.tgz
+*.tar.gz
+*.zip

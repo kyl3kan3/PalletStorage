@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Placeholders just to satisfy format validation during static build.
+      # Real secrets are injected in deploy workflow, not CI.
+      DATABASE_URL: postgres://placeholder:placeholder@localhost:5432/placeholder
+      CLERK_SECRET_KEY: sk_test_placeholder
+      CLERK_PUBLISHABLE_KEY: pk_test_YWJjZGVmLmNsZXJrLmFjY291bnRzLmRldiQ
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_YWJjZGVmLmNsZXJrLmFjY291bnRzLmRldiQ
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @wms/core test
+
+      - name: Build web
+        run: pnpm --filter @wms/web build
