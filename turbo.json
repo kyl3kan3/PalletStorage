@@ -1,8 +1,23 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "VERCEL_ENV"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL",
+        "CLERK_SECRET_KEY",
+        "CLERK_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "CLERK_WEBHOOK_SIGNING_SECRET",
+        "QBO_CLIENT_ID",
+        "QBO_CLIENT_SECRET",
+        "QBO_REDIRECT_URI",
+        "QBO_ENV"
+      ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "dev": {
