@@ -5,9 +5,8 @@ const nextConfig = {
   // Emit a minimal self-contained server under .next/standalone so the
   // Docker runtime stage can COPY it without the full node_modules tree.
   output: "standalone",
-  experimental: {
-    typedRoutes: true,
-  },
+  // Moved out of `experimental` in Next 15.5+.
+  typedRoutes: true,
 };
 
 export default nextConfig;
