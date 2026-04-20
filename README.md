@@ -1,6 +1,6 @@
 # WMS — Pallet Storage / Warehouse Management System
 
-Multi-tenant SaaS WMS: inbound receiving & putaway, inventory/location tracking, outbound picking & shipping, barcode/QR scanning.
+Multi-tenant SaaS WMS: inbound receiving & putaway, inventory/location tracking, outbound picking & shipping, barcode/QR scanning. Deployable on Vercel with a Neon Postgres backend.
 
 ## Stack
 - pnpm workspaces + Turborepo monorepo
