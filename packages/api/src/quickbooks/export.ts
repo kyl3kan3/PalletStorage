@@ -1,17 +1,25 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@wms/db";
 import { qboFetch, type QboConnection } from "./client";
+import {
+  escapeQboLiteral,
+  findOrCreateCustomer,
+  findOrCreateVendor,
+  resolveAccounts,
+  type ResolvedAccounts,
+} from "./refs";
 
 /**
- * Ensure every WMS product referenced by a line has a corresponding QBO Item.
- * Cached on the quickbooks_connections row as productItemMap to avoid
- * round-tripping on every export.
+ * Ensure every WMS product referenced by a line has a matching QBO Item.
+ * Cached on quickbooks_connections.productItemMap so we don't query QBO
+ * on every export.
  */
 async function ensureItems(
   db: Db,
   conn: typeof schema.quickbooksConnections.$inferSelect,
   orgId: string,
   productIds: string[],
+  accounts: ResolvedAccounts,
 ): Promise<Record<string, string>> {
   const map = { ...conn.productItemMap };
   const missing = productIds.filter((id) => !map[id]);
@@ -23,9 +31,10 @@ async function ensureItems(
     .where(and(eq(schema.products.organizationId, orgId), inArray(schema.products.id, missing)));
 
   for (const p of products) {
+    // Try to find an existing Item by SKU (stored as QBO Item Name).
     const existing = await qboFetch<{ QueryResponse: { Item?: { Id: string }[] } }>(
       conn,
-      `/query?query=${encodeURIComponent(`select * from Item where Name = '${p.sku.replace(/'/g, "\\'")}'`)}`,
+      `/query?query=${encodeURIComponent(`select * from Item where Name = '${escapeQboLiteral(p.sku)}'`)}`,
     );
     let qboId = existing.QueryResponse.Item?.[0]?.Id;
     if (!qboId) {
@@ -38,9 +47,12 @@ async function ensureItems(
           TrackQtyOnHand: true,
           QtyOnHand: 0,
           InvStartDate: new Date().toISOString().slice(0, 10),
-          IncomeAccountRef: { value: "1" },
-          ExpenseAccountRef: { value: "2" },
-          AssetAccountRef: { value: "3" },
+          IncomeAccountRef: { value: accounts.income },
+          ExpenseAccountRef: { value: accounts.expense },
+          AssetAccountRef: { value: accounts.asset },
+          ...(p.unitPriceCents != null
+            ? { UnitPrice: p.unitPriceCents / 100 }
+            : {}),
         },
       });
       qboId = created.Item.Id;
@@ -56,6 +68,13 @@ async function ensureItems(
   return map;
 }
 
+/** qty * unit_price_cents / 100, or 0 when no price is set. */
+function lineAmount(qty: number, unitPriceCents: number | null | undefined): number {
+  if (!unitPriceCents) return 0;
+  return (qty * unitPriceCents) / 100;
+}
+
+// ── Inbound → Bill ───────────────────────────────────────────────────
 export async function exportInboundAsBill(
   db: Db,
   conn: typeof schema.quickbooksConnections.$inferSelect,
@@ -70,18 +89,26 @@ export async function exportInboundAsBill(
   if (!order) throw new Error("Inbound order not found");
 
   const lines = await db
-    .select()
+    .select({
+      id: schema.inboundLines.id,
+      productId: schema.inboundLines.productId,
+      qtyReceived: schema.inboundLines.qtyReceived,
+      unitPriceCents: schema.products.unitPriceCents,
+    })
     .from(schema.inboundLines)
+    .innerJoin(schema.products, eq(schema.products.id, schema.inboundLines.productId))
     .where(eq(schema.inboundLines.inboundOrderId, inboundOrderId));
 
-  const itemMap = await ensureItems(db, conn, orgId, lines.map((l) => l.productId));
+  const accounts = await resolveAccounts(conn);
+  const itemMap = await ensureItems(db, conn, orgId, lines.map((l) => l.productId), accounts);
+  const vendorId = await findOrCreateVendor(conn, order.supplier ?? `Supplier (${order.reference})`);
 
   const bill = {
-    VendorRef: { value: "1", name: order.supplier ?? "Unknown" },
+    VendorRef: { value: vendorId },
     DocNumber: order.reference,
     Line: lines.map((l) => ({
       DetailType: "ItemBasedExpenseLineDetail",
-      Amount: l.qtyReceived, // unit cost is tracked in QB Item; this is a placeholder
+      Amount: lineAmount(l.qtyReceived, l.unitPriceCents),
       ItemBasedExpenseLineDetail: {
         ItemRef: { value: itemMap[l.productId] },
         Qty: l.qtyReceived,
@@ -89,10 +116,14 @@ export async function exportInboundAsBill(
     })),
   };
 
-  const res = await qboFetch<{ Bill: { Id: string } }>(conn, "/bill", { method: "POST", body: bill });
+  const res = await qboFetch<{ Bill: { Id: string } }>(conn, "/bill", {
+    method: "POST",
+    body: bill,
+  });
   return { qboId: res.Bill.Id };
 }
 
+// ── Outbound → Invoice ───────────────────────────────────────────────
 export async function exportOutboundAsInvoice(
   db: Db,
   conn: typeof schema.quickbooksConnections.$inferSelect,
@@ -107,18 +138,29 @@ export async function exportOutboundAsInvoice(
   if (!order) throw new Error("Outbound order not found");
 
   const lines = await db
-    .select()
+    .select({
+      id: schema.outboundLines.id,
+      productId: schema.outboundLines.productId,
+      qtyPicked: schema.outboundLines.qtyPicked,
+      unitPriceCents: schema.products.unitPriceCents,
+    })
     .from(schema.outboundLines)
+    .innerJoin(schema.products, eq(schema.products.id, schema.outboundLines.productId))
     .where(eq(schema.outboundLines.outboundOrderId, outboundOrderId));
 
-  const itemMap = await ensureItems(db, conn, orgId, lines.map((l) => l.productId));
+  const accounts = await resolveAccounts(conn);
+  const itemMap = await ensureItems(db, conn, orgId, lines.map((l) => l.productId), accounts);
+  const customerId = await findOrCreateCustomer(
+    conn,
+    order.customer ?? `Customer (${order.reference})`,
+  );
 
   const invoice = {
-    CustomerRef: { value: "1", name: order.customer ?? "Unknown" },
+    CustomerRef: { value: customerId },
     DocNumber: order.reference,
     Line: lines.map((l) => ({
       DetailType: "SalesItemLineDetail",
-      Amount: l.qtyPicked,
+      Amount: lineAmount(l.qtyPicked, l.unitPriceCents),
       SalesItemLineDetail: {
         ItemRef: { value: itemMap[l.productId] },
         Qty: l.qtyPicked,
@@ -126,28 +168,98 @@ export async function exportOutboundAsInvoice(
     })),
   };
 
-  const res = await qboFetch<{ Invoice: { Id: string } }>(conn, "/invoice", { method: "POST", body: invoice });
+  const res = await qboFetch<{ Invoice: { Id: string } }>(conn, "/invoice", {
+    method: "POST",
+    body: invoice,
+  });
   return { qboId: res.Invoice.Id };
 }
 
+// ── Cycle-count adjustments → per-item QtyOnHand sparse update ───────
+/**
+ * QBO v3 doesn't expose an InventoryAdjustment object; the canonical way
+ * to reflect a stock-take variance is a sparse PUT on each Item adjusting
+ * its QtyOnHand. We collapse the supplied movements by product (summing
+ * deltas) and push one sparse update per item.
+ */
 export async function exportAdjustmentAsInventoryAdjustment(
   db: Db,
-  _conn: typeof schema.quickbooksConnections.$inferSelect,
+  conn: typeof schema.quickbooksConnections.$inferSelect,
   orgId: string,
   movementIds: string[],
 ) {
   const movements = await db
-    .select()
+    .select({
+      movement: schema.movements,
+      palletItem: schema.palletItems,
+    })
     .from(schema.movements)
+    .innerJoin(schema.palletItems, eq(schema.palletItems.palletId, schema.movements.palletId))
     .where(
       and(
         eq(schema.movements.organizationId, orgId),
         inArray(schema.movements.id, movementIds),
+        eq(schema.movements.reason, "cycle_count"),
       ),
     );
-  // QBO v3 does not have a first-class InventoryAdjustment endpoint in all
-  // regions; the usual pattern is a JournalEntry or adjusting the Item's
-  // QtyOnHand directly. Left as a focused follow-up once the real
-  // chart-of-accounts mapping is known.
-  return { qboId: "pending", movements: movements.length };
+
+  if (movements.length === 0) {
+    throw new Error("No cycle_count movements found for the provided ids");
+  }
+
+  // Parse the variance from the movement notes ("variance +N ..." or "variance -N ...").
+  const deltaByProduct = new Map<string, number>();
+  for (const row of movements) {
+    const m = row.movement;
+    const match = m.notes?.match(/variance\s+([+-]?\d+)/i);
+    if (!match) continue;
+    const delta = Number.parseInt(match[1]!, 10);
+    if (Number.isNaN(delta)) continue;
+    const key = row.palletItem.productId;
+    deltaByProduct.set(key, (deltaByProduct.get(key) ?? 0) + delta);
+  }
+
+  if (deltaByProduct.size === 0) {
+    return { qboId: "no_variance", movements: movements.length };
+  }
+
+  const accounts = await resolveAccounts(conn);
+  const itemMap = await ensureItems(
+    db,
+    conn,
+    orgId,
+    [...deltaByProduct.keys()],
+    accounts,
+  );
+
+  const results: Array<{ productId: string; itemId: string; qtyOnHand: number }> = [];
+
+  // Fetch each current Item (we need SyncToken for sparse updates) and
+  // post back a new QtyOnHand = current + delta.
+  for (const [productId, delta] of deltaByProduct.entries()) {
+    const itemId = itemMap[productId];
+    if (!itemId) continue;
+    const current = await qboFetch<{ Item: { SyncToken: string; QtyOnHand?: number } }>(
+      conn,
+      `/item/${encodeURIComponent(itemId)}`,
+    );
+    const nextQty = (current.Item.QtyOnHand ?? 0) + delta;
+    const updated = await qboFetch<{ Item: { Id: string; QtyOnHand: number } }>(
+      conn,
+      "/item?operation=update",
+      {
+        method: "POST",
+        body: {
+          Id: itemId,
+          SyncToken: current.Item.SyncToken,
+          sparse: true,
+          QtyOnHand: Math.max(0, nextQty),
+          InvStartDate: new Date().toISOString().slice(0, 10),
+        },
+      },
+    );
+    results.push({ productId, itemId, qtyOnHand: updated.Item.QtyOnHand });
+  }
+
+  return { qboId: `${results.length}_items_adjusted`, movements: movements.length, results };
 }

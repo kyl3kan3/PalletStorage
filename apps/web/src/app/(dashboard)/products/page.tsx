@@ -155,7 +155,7 @@ export default function ProductsPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "160px 1fr 160px 100px",
+            gridTemplateColumns: "160px 1fr 140px 90px 120px",
             gap: 16,
             padding: "14px 20px",
             fontSize: 11,
@@ -169,6 +169,7 @@ export default function ProductsPage() {
           <div>Name</div>
           <div>Barcode</div>
           <div>Weight</div>
+          <div>Unit price</div>
         </div>
         {(list.data?.length ?? 0) === 0 && (
           <div
@@ -184,39 +185,128 @@ export default function ProductsPage() {
           </div>
         )}
         {list.data?.map((p) => (
-          <div
-            key={p.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "160px 1fr 160px 100px",
-              gap: 16,
-              padding: "12px 20px",
-              alignItems: "center",
-              borderTop: `1.5px dashed ${t.border}`,
-              fontSize: 13.5,
-              color: t.body,
-            }}
-          >
-            <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>{p.sku}</span>
-            <span>
-              {p.name}
-              {p.velocityClass && (
-                <span style={{ marginLeft: 8 }}>
-                  <Tag t={t} tone={p.velocityClass === "A" ? "primary" : p.velocityClass === "B" ? "sky" : "neutral"}>
-                    {p.velocityClass}
-                  </Tag>
-                </span>
-              )}
-            </span>
-            <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.muted }}>
-              {p.barcode ?? "—"}
-            </span>
-            <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
-              {p.weightKg ?? "—"}
-            </span>
-          </div>
+          <ProductRow key={p.id} product={p} />
         ))}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Inline-editable row. Price is the only field editable here for now —
+ * SKU, name, barcode, weight are all set at product creation.
+ */
+function ProductRow({
+  product,
+}: {
+  product: {
+    id: string;
+    sku: string;
+    name: string;
+    barcode: string | null;
+    weightKg: string | null;
+    velocityClass: string | null;
+    unitPriceCents: number | null;
+  };
+}) {
+  const t = theme;
+  const utils = trpc.useUtils();
+  const setPrice = trpc.product.setPrice.useMutation({
+    onSuccess: () => utils.product.search.invalidate(),
+  });
+  const [draft, setDraft] = useState(
+    product.unitPriceCents != null ? (product.unitPriceCents / 100).toFixed(2) : "",
+  );
+  const [editing, setEditing] = useState(false);
+
+  function commit() {
+    const parsed = draft.trim() === "" ? null : Math.round(Number.parseFloat(draft) * 100);
+    if (parsed != null && (Number.isNaN(parsed) || parsed < 0)) return;
+    setPrice.mutate({ id: product.id, unitPriceCents: parsed });
+    setEditing(false);
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "160px 1fr 140px 90px 120px",
+        gap: 16,
+        padding: "12px 20px",
+        alignItems: "center",
+        borderTop: `1.5px dashed ${t.border}`,
+        fontSize: 13.5,
+        color: t.body,
+      }}
+    >
+      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>{product.sku}</span>
+      <span>
+        {product.name}
+        {product.velocityClass && (
+          <span style={{ marginLeft: 8 }}>
+            <Tag
+              t={t}
+              tone={
+                product.velocityClass === "A"
+                  ? "primary"
+                  : product.velocityClass === "B"
+                    ? "sky"
+                    : "neutral"
+              }
+            >
+              {product.velocityClass}
+            </Tag>
+          </span>
+        )}
+      </span>
+      <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.muted }}>
+        {product.barcode ?? "—"}
+      </span>
+      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+        {product.weightKg ?? "—"}
+      </span>
+      <span>
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            placeholder="0.00"
+            style={{
+              width: 90,
+              padding: "6px 10px",
+              borderRadius: 10,
+              background: t.surfaceAlt,
+              border: `1.5px solid ${t.border}`,
+              outline: "none",
+              fontFamily: FONTS.mono,
+              fontSize: 13,
+              color: t.ink,
+            }}
+          />
+        ) : (
+          <button
+            onClick={() => setEditing(true)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontFamily: FONTS.mono,
+              fontSize: 13,
+              color: product.unitPriceCents != null ? t.ink : t.muted,
+              fontWeight: 600,
+            }}
+          >
+            {product.unitPriceCents != null ? `$${(product.unitPriceCents / 100).toFixed(2)}` : "set…"}
+          </button>
+        )}
+      </span>
     </div>
   );
 }

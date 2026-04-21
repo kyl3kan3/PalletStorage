@@ -77,10 +77,41 @@ Re-run after pulling new migrations.
   hand in Postgres.
 
 ### 5. (Optional) QuickBooks
-Register an app at <https://developer.intuit.com>, add
-`https://<your-app>.vercel.app/api/quickbooks/callback` as a redirect
-URI, and copy the four `QBO_*` vars. Skip entirely if you don't want the
-integration — the rest of the dashboard works without it.
+
+The QuickBooks Online integration can round-trip three things: inbound
+orders → Bills, shipped outbound orders → Invoices, and cycle-count
+variances → sparse QtyOnHand updates on each Item.
+
+**One-time setup (in QBO):**
+1. <https://developer.intuit.com> → **My Apps** → create a new app for
+   "Accounting". Copy the Client ID + Client Secret.
+2. Under **Redirect URIs**, add
+   `https://<your-app>.vercel.app/api/quickbooks/callback`.
+3. Create a **Sandbox Company** in the Intuit developer dashboard if you
+   don't already have one.
+
+**Vercel env vars:**
+```
+QBO_CLIENT_ID=<from Intuit>
+QBO_CLIENT_SECRET=<from Intuit>
+QBO_REDIRECT_URI=https://<your-app>.vercel.app/api/quickbooks/callback
+QBO_ENV=sandbox
+```
+
+**In-app:**
+1. Go to `/settings/integrations` → **Connect**.
+2. Intuit consent flow → picks your sandbox company → redirects back.
+3. Set a **unit price** on each product (inline on `/products`) so
+   Bills and Invoices post non-zero dollar amounts. Lines without a
+   unit price will still export — they'll just show `$0`.
+4. The export creates QBO Vendors / Customers automatically (from the
+   order's supplier / customer field) and picks sensible default
+   chart-of-accounts entries (Income, COGS, Inventory Asset). If your
+   sandbox is missing those account types the export throws a clear
+   error.
+
+Skip this section entirely if you don't want the integration — the
+rest of the dashboard works without it.
 
 ### 6. Deploy
 Vercel rebuilds on every push to `main`. Preview deployments run on each

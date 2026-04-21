@@ -35,6 +35,7 @@ export const productRouter = router({
               barcode: z.string().optional(),
               weightKg: z.number().positive().optional(),
               velocityClass: z.enum(["A", "B", "C"]).optional(),
+              unitPriceCents: z.number().int().min(0).optional(),
             }),
           )
           .min(1)
@@ -50,9 +51,8 @@ export const productRouter = router({
         barcode: p.barcode,
         weightKg: p.weightKg?.toString(),
         velocityClass: p.velocityClass,
+        unitPriceCents: p.unitPriceCents,
       }));
-      // onConflictDoUpdate on (organization_id, sku) so re-imports update
-      // rather than fail — standard ETL behaviour.
       await ctx.db
         .insert(schema.products)
         .values(rows)
@@ -63,6 +63,7 @@ export const productRouter = router({
             barcode: sql`excluded.barcode`,
             weightKg: sql`excluded.weight_kg`,
             velocityClass: sql`excluded.velocity_class`,
+            unitPriceCents: sql`excluded.unit_price_cents`,
           },
         });
       return { imported: rows.length };
@@ -76,6 +77,7 @@ export const productRouter = router({
         barcode: z.string().optional(),
         weightKg: z.number().positive().optional(),
         velocityClass: z.enum(["A", "B", "C"]).optional(),
+        unitPriceCents: z.number().int().min(0).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -89,8 +91,29 @@ export const productRouter = router({
           barcode: input.barcode,
           weightKg: input.weightKg?.toString(),
           velocityClass: input.velocityClass,
+          unitPriceCents: input.unitPriceCents,
         })
         .returning();
       return row;
+    }),
+
+  /**
+   * Update the unit price (cents). Kept as its own mutation so the
+   * Products page can inline-edit without round-tripping every field.
+   */
+  setPrice: tenantProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        unitPriceCents: z.number().int().min(0).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      await ctx.db
+        .update(schema.products)
+        .set({ unitPriceCents: input.unitPriceCents })
+        .where(and(eq(schema.products.id, input.id), eq(schema.products.organizationId, orgId)));
+      return { ok: true };
     }),
 });

@@ -88,8 +88,11 @@ CREATE TABLE IF NOT EXISTS "products" (
   "height_mm" integer,
   "weight_kg" numeric(10, 3),
   "velocity_class" text,
+  "unit_price_cents" integer,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+-- If you ran this script before unit_price_cents existed, add it now:
+ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "unit_price_cents" integer;
 CREATE UNIQUE INDEX IF NOT EXISTS "products_org_sku_uq" ON "products" ("organization_id", "sku");
 CREATE INDEX IF NOT EXISTS "products_barcode_idx" ON "products" ("barcode");
 

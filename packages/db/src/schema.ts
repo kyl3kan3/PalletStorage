@@ -164,6 +164,10 @@ export const products = pgTable(
     heightMm: integer("height_mm"),
     weightKg: numeric("weight_kg", { precision: 10, scale: 3 }),
     velocityClass: text("velocity_class"),
+    // Unit price in cents. Used by the QuickBooks export to compute the
+    // Line.Amount on Bills (cost) and Invoices (sell). Nullable so
+    // existing rows aren't forced into a price they don't have yet.
+    unitPriceCents: integer("unit_price_cents"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
