@@ -4,6 +4,7 @@ import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, SquircleIcon, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { SettingsNav } from "~/components/settings-nav";
 
 export default function IntegrationsPage() {
   const t = theme;
@@ -25,6 +26,7 @@ export default function IntegrationsPage() {
 
   return (
     <div>
+      <SettingsNav />
       <PageTitle
         eyebrow="Outside services"
         title="Integrations"

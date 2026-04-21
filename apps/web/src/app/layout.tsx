@@ -35,7 +35,16 @@ const mono = JetBrains_Mono({
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
+    // Fallback URLs tell Clerk where to go when the sign-in / sign-up
+    // flow completes and there's no explicit `redirect_url` on the
+    // request (e.g. someone following an invite link). Without these,
+    // the user lands on Clerk's own "You're signed in" screen instead
+    // of bouncing back into the WMS.
+    <ClerkProvider
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+      afterSignOutUrl="/"
+    >
       <html lang="en" className={`${fraunces.variable} ${geist.variable} ${mono.variable}`}>
         <body className="min-h-screen antialiased">
           <TRPCProvider>{children}</TRPCProvider>

@@ -32,6 +32,26 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Ic.Settings },
 ];
 
+/**
+ * Pick the nav entry whose href is the longest prefix of `pathname`.
+ * Avoids the "/inventory/counts → highlights both Inventory and Cycle
+ * Counts" bug you get with a naive startsWith check.
+ */
+function activeHref(pathname: string): string | null {
+  let best: string | null = null;
+  let bestLen = -1;
+  for (const n of NAV) {
+    const match =
+      pathname === n.href ||
+      (n.href !== "/" && pathname.startsWith(`${n.href}/`));
+    if (match && n.href.length > bestLen) {
+      best = n.href;
+      bestLen = n.href.length;
+    }
+  }
+  return best;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const t = theme;
@@ -81,10 +101,10 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         {NAV.map((n) => {
-          // Active if exact match, or (for non-root routes) if we're nested under it.
-          const on =
-            pathname === n.href ||
-            (n.href !== "/" && pathname.startsWith(`${n.href}/`));
+          // Pick the longest-matching nav item as active so nested
+          // routes (e.g. /inventory/counts) don't also light up their
+          // parent (/inventory).
+          const on = activeHref(pathname) === n.href;
           const Icon = n.icon;
           return (
             <Link
