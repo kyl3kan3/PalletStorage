@@ -13,6 +13,7 @@ export default function IntegrationsPage() {
     onSuccess: () => status.refetch(),
   });
   const history = trpc.quickbooks.history.useQuery({ limit: 50 });
+  const webhooks = trpc.quickbooks.webhookHistory.useQuery({ limit: 30 });
 
   async function connect() {
     const res = await authorize.refetch();
@@ -65,6 +66,108 @@ export default function IntegrationsPage() {
           )}
         </div>
       </Card>
+
+      <div style={{ marginTop: 24 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: t.muted,
+            textTransform: "uppercase",
+            letterSpacing: 0.6,
+            fontWeight: 600,
+            marginBottom: 8,
+          }}
+        >
+          Activity from QuickBooks
+        </div>
+
+        <Card t={t} padding={0}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 160px 120px 1fr",
+              gap: 16,
+              padding: "14px 20px",
+              fontSize: 11,
+              color: t.muted,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              fontWeight: 600,
+            }}
+          >
+            <div>When</div>
+            <div>Entity</div>
+            <div>Op</div>
+            <div>Changed in QBO</div>
+          </div>
+          {(webhooks.data?.length ?? 0) === 0 && (
+            <div
+              style={{
+                padding: "20px",
+                borderTop: `1.5px dashed ${t.border}`,
+                color: t.muted,
+                fontSize: 13,
+                textAlign: "center",
+              }}
+            >
+              No webhook events yet. Make sure the webhook endpoint is registered in
+              your Intuit developer dashboard and the verifier token is set in Vercel.
+            </div>
+          )}
+          {webhooks.data?.map((e) => (
+            <div
+              key={e.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "160px 160px 120px 1fr",
+                gap: 16,
+                padding: "12px 20px",
+                alignItems: "center",
+                borderTop: `1.5px dashed ${t.border}`,
+                fontSize: 13,
+              }}
+            >
+              <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                {e.receivedAt.toLocaleString()}
+              </span>
+              <span>
+                <Tag
+                  t={t}
+                  tone={
+                    e.entityName === "Invoice"
+                      ? "primary"
+                      : e.entityName === "Bill"
+                        ? "sky"
+                        : e.entityName === "Item"
+                          ? "mint"
+                          : "neutral"
+                  }
+                >
+                  {e.entityName}
+                </Tag>{" "}
+                <span style={{ fontFamily: FONTS.mono, color: t.ink }}>{e.entityId}</span>
+              </span>
+              <span>
+                <Tag
+                  t={t}
+                  tone={
+                    e.operation === "Create"
+                      ? "mint"
+                      : e.operation === "Delete" || e.operation === "Void"
+                        ? "coral"
+                        : "neutral"
+                  }
+                >
+                  {e.operation}
+                </Tag>
+              </span>
+              <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                {e.lastUpdated?.toLocaleString() ?? "—"}
+              </span>
+            </div>
+          ))}
+        </Card>
+      </div>
 
       <div style={{ marginTop: 24 }}>
         <div

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "@wms/db";
 import { router, tenantProcedure, adminProcedure } from "../trpc";
@@ -127,6 +127,26 @@ export const quickbooksRouter = router({
         .select()
         .from(schema.quickbooksExports)
         .where(eq(schema.quickbooksExports.organizationId, orgId))
+        .limit(input.limit);
+    }),
+
+  /** Recent inbound webhook events from QuickBooks for this org. */
+  webhookHistory: tenantProcedure
+    .input(z.object({ limit: z.number().int().max(200).default(50) }).default({}))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db
+        .select({
+          id: schema.quickbooksWebhookEvents.id,
+          entityName: schema.quickbooksWebhookEvents.entityName,
+          entityId: schema.quickbooksWebhookEvents.entityId,
+          operation: schema.quickbooksWebhookEvents.operation,
+          lastUpdated: schema.quickbooksWebhookEvents.lastUpdated,
+          receivedAt: schema.quickbooksWebhookEvents.receivedAt,
+        })
+        .from(schema.quickbooksWebhookEvents)
+        .where(eq(schema.quickbooksWebhookEvents.organizationId, orgId))
+        .orderBy(desc(schema.quickbooksWebhookEvents.receivedAt))
         .limit(input.limit);
     }),
 });

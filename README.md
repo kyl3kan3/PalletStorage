@@ -110,6 +110,27 @@ QBO_ENV=sandbox
    sandbox is missing those account types the export throws a clear
    error.
 
+**Inbound webhooks (optional):**
+
+To know when someone edits an exported Invoice or Bill inside QBO, add
+a webhook subscription:
+
+1. Intuit dev dashboard → your app → **Webhooks**.
+2. Endpoint: `https://<your-app>.vercel.app/api/webhooks/quickbooks`.
+3. Subscribe to the entity types you care about (Invoice, Bill, Item,
+   etc.). Intuit generates a **Verifier Token**.
+4. Set `QBO_WEBHOOK_VERIFIER_TOKEN=<token>` in Vercel and redeploy.
+
+Each inbound event is persisted to `quickbooks_webhook_events` and
+surfaced on `/settings/integrations`. The receiver verifies every
+payload via HMAC-SHA256 against the raw body and rejects unsigned
+requests with 401 — bypassing this check is a CSRF vector, so don't
+"temporarily disable" it.
+
+Intuit has [announced a payload structure change](https://medium.com/intuitdev/upcoming-change-to-webhooks-payload-structure-2a87dab642d0) —
+our parser reads fields defensively and stores the raw payload in
+`rawPayload`, so new fields flow through without code changes.
+
 Skip this section entirely if you don't want the integration — the
 rest of the dashboard works without it.
 

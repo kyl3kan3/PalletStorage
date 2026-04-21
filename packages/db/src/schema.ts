@@ -511,6 +511,36 @@ export const quickbooksExports = pgTable(
   }),
 );
 
+/**
+ * Each inbound webhook event from QuickBooks. Intuit POSTs one request
+ * per realm change; a single request can carry many entity changes. We
+ * fan it out to one row per entity for easier querying.
+ */
+export const quickbooksWebhookEvents = pgTable(
+  "quickbooks_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // organization_id can be null for the brief window before a realm is
+    // linked to an org (shouldn't happen in practice but we don't want
+    // to drop events from a misconfigured tenant).
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
+    realmId: text("realm_id").notNull(),
+    entityName: text("entity_name").notNull(), // "Invoice", "Bill", "Item", ...
+    entityId: text("entity_id").notNull(),
+    operation: text("operation").notNull(), // "Create" | "Update" | "Delete" | "Merge" | "Void" | "Emailed"
+    lastUpdated: timestamp("last_updated", { withTimezone: true }),
+    rawPayload: jsonb("raw_payload").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orgIdx: index("qb_wh_org_idx").on(t.organizationId, t.receivedAt),
+    realmIdx: index("qb_wh_realm_idx").on(t.realmId, t.receivedAt),
+    entityIdx: index("qb_wh_entity_idx").on(t.realmId, t.entityName, t.entityId),
+  }),
+);
+
 // ──────────────────────────────────────────────────────────────────────
 // Relations
 // ──────────────────────────────────────────────────────────────────────

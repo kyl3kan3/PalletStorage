@@ -268,6 +268,21 @@ CREATE TABLE IF NOT EXISTS "cycle_counts" (
 CREATE INDEX IF NOT EXISTS "cycle_counts_org_idx" ON "cycle_counts" ("organization_id");
 CREATE INDEX IF NOT EXISTS "cycle_counts_status_idx" ON "cycle_counts" ("organization_id", "status");
 
+CREATE TABLE IF NOT EXISTS "quickbooks_webhook_events" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "organization_id" uuid REFERENCES "organizations"("id") ON DELETE CASCADE,
+  "realm_id" text NOT NULL,
+  "entity_name" text NOT NULL,
+  "entity_id" text NOT NULL,
+  "operation" text NOT NULL,
+  "last_updated" timestamp with time zone,
+  "raw_payload" jsonb NOT NULL,
+  "received_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "qb_wh_org_idx" ON "quickbooks_webhook_events" ("organization_id", "received_at");
+CREATE INDEX IF NOT EXISTS "qb_wh_realm_idx" ON "quickbooks_webhook_events" ("realm_id", "received_at");
+CREATE INDEX IF NOT EXISTS "qb_wh_entity_idx" ON "quickbooks_webhook_events" ("realm_id", "entity_name", "entity_id");
+
 CREATE TABLE IF NOT EXISTS "cycle_count_lines" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
