@@ -1,3 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* "Stacks" brand — warm cream canvas for the whole app. */
+html,
+body {
+  background: #faf6ee;
+  color: #2e2824;
+  font-family: var(--font-geist), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
