@@ -8,16 +8,17 @@ import { Ic } from "~/components/icons";
 export default function IntegrationsPage() {
   const t = theme;
   const status = trpc.quickbooks.status.useQuery();
-  const authorize = trpc.quickbooks.authorizeUrl.useQuery(undefined, { enabled: false });
   const disconnect = trpc.quickbooks.disconnect.useMutation({
     onSuccess: () => status.refetch(),
   });
   const history = trpc.quickbooks.history.useQuery({ limit: 50 });
   const webhooks = trpc.quickbooks.webhookHistory.useQuery({ limit: 30 });
 
-  async function connect() {
-    const res = await authorize.refetch();
-    if (res.data?.url) window.location.href = res.data.url;
+  // The authorize route derives the redirect_uri from the current origin
+  // (so no env var to misconfigure) and sets a CSRF nonce cookie before
+  // bouncing the browser to Intuit's consent screen.
+  function connect() {
+    window.location.href = "/api/quickbooks/authorize";
   }
 
   const connected = !!status.data?.connected;

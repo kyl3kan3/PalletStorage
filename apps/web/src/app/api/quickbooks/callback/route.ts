@@ -34,7 +34,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "oauth state org mismatch" }, { status: 400 });
   }
 
-  const tokens = await exchangeAuthCode(code);
+  // Intuit requires the redirect_uri on the token exchange to match the
+  // one we sent on /authorize exactly. We stashed it in a cookie there.
+  const redirectUri =
+    req.cookies.get("qb_redirect_uri")?.value ??
+    new URL("/api/quickbooks/callback", req.url).toString();
+
+  const tokens = await exchangeAuthCode(code, redirectUri);
 
   const [org] = await db
     .select({ id: schema.organizations.id })
@@ -66,6 +72,7 @@ export async function GET(req: NextRequest) {
 
   const res = NextResponse.redirect(new URL("/settings/integrations?connected=quickbooks", req.url));
   res.cookies.set("qb_oauth_state", "", { path: "/", maxAge: 0 });
+  res.cookies.set("qb_redirect_uri", "", { path: "/", maxAge: 0 });
   return res;
 }
 

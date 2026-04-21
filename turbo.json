@@ -15,8 +15,8 @@
         "CLERK_WEBHOOK_SIGNING_SECRET",
         "QBO_CLIENT_ID",
         "QBO_CLIENT_SECRET",
-        "QBO_REDIRECT_URI",
-        "QBO_ENV"
+        "QBO_ENV",
+        "QBO_WEBHOOK_VERIFIER_TOKEN"
       ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },

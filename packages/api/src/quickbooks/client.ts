@@ -31,12 +31,12 @@ function requireEnv(k: string): string {
   return v;
 }
 
-export function buildAuthorizeUrl(state: string): string {
+export function buildAuthorizeUrl(state: string, redirectUri: string): string {
   const params = new URLSearchParams({
     client_id: requireEnv("QBO_CLIENT_ID"),
     response_type: "code",
     scope: "com.intuit.quickbooks.accounting",
-    redirect_uri: requireEnv("QBO_REDIRECT_URI"),
+    redirect_uri: redirectUri,
     state,
   });
   return `${env().authorize}?${params.toString()}`;
@@ -65,12 +65,12 @@ async function tokenRequest(body: URLSearchParams): Promise<TokenResponse> {
   return res.json() as Promise<TokenResponse>;
 }
 
-export function exchangeAuthCode(code: string): Promise<TokenResponse> {
+export function exchangeAuthCode(code: string, redirectUri: string): Promise<TokenResponse> {
   return tokenRequest(
     new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: requireEnv("QBO_REDIRECT_URI"),
+      redirect_uri: redirectUri,
     }),
   );
 }

@@ -4,52 +4,20 @@ import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "@wms/db";
 import { router, tenantProcedure, adminProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
-import {
-  exchangeAuthCode,
-  refreshAccessToken,
-  buildAuthorizeUrl,
-} from "../quickbooks/client";
+import { refreshAccessToken } from "../quickbooks/client";
 import {
   exportInboundAsBill,
   exportOutboundAsInvoice,
   exportAdjustmentAsInventoryAdjustment,
 } from "../quickbooks/export";
 
+// NOTE: OAuth kickoff lives at /api/quickbooks/authorize (full route, not
+// tRPC) so the redirect_uri is derived from the request origin and we can
+// set an httpOnly state cookie on the response. The callback route
+// exchanges the code + persists tokens. Keeping OAuth out of tRPC means
+// one less env var to misconfigure.
+
 export const quickbooksRouter = router({
-  /** Kick off OAuth: returns the Intuit consent URL. */
-  authorizeUrl: adminProcedure.query(({ ctx }) => {
-    return { url: buildAuthorizeUrl(ctx.orgId) };
-  }),
-
-  /** OAuth callback: trade the code for tokens and persist them. */
-  completeAuth: adminProcedure
-    .input(z.object({ code: z.string(), realmId: z.string(), state: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const orgId = await requireOrgId(ctx);
-      const tokens = await exchangeAuthCode(input.code);
-      await ctx.db
-        .insert(schema.quickbooksConnections)
-        .values({
-          organizationId: orgId,
-          realmId: input.realmId,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          accessTokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
-          refreshTokenExpiresAt: new Date(Date.now() + tokens.x_refresh_token_expires_in * 1000),
-        })
-        .onConflictDoUpdate({
-          target: schema.quickbooksConnections.organizationId,
-          set: {
-            realmId: input.realmId,
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            accessTokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
-            refreshTokenExpiresAt: new Date(Date.now() + tokens.x_refresh_token_expires_in * 1000),
-          },
-        });
-      return { ok: true };
-    }),
-
   status: tenantProcedure.query(async ({ ctx }) => {
     const orgId = await requireOrgId(ctx);
     const [conn] = await ctx.db

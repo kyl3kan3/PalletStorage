@@ -94,9 +94,10 @@ variances → sparse QtyOnHand updates on each Item.
 ```
 QBO_CLIENT_ID=<from Intuit>
 QBO_CLIENT_SECRET=<from Intuit>
-QBO_REDIRECT_URI=https://<your-app>.vercel.app/api/quickbooks/callback
 QBO_ENV=sandbox
 ```
+The redirect URI is derived at request time from the deployment origin,
+so there's nothing to configure beyond what you tell Intuit.
 
 **In-app:**
 1. Go to `/settings/integrations` → **Connect**.
