@@ -3,15 +3,15 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, Tag } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle, Tag } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 
 export default function ExpiringReportPage() {
   const t = theme;
   const [days, setDays] = useState(30);
   const q = trpc.report.expiringStock.useQuery({ days });
+  const org = trpc.organization.current.useQuery();
   const rows = q.data ?? [];
   const now = Date.now();
 
@@ -23,34 +23,42 @@ export default function ExpiringReportPage() {
         title="Expiring stock"
         subtitle="Pallet items with an expiry date inside the window. Sorted soonest first."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `expiring-${days}d-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  { key: "sku", header: "SKU" },
-                  { key: "productName", header: "Name" },
-                  { key: "lpn", header: "LPN" },
-                  { key: "lot", header: "Lot" },
-                  { key: "qty", header: "Qty" },
-                  {
-                    key: "expiry",
-                    header: "Expiry",
-                    format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
-                  },
-                  { key: "locationPath", header: "Location" },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName={`expiring-${days}d`}
+            rows={rows}
+            csvColumns={[
+              { key: "sku", header: "SKU" },
+              { key: "productName", header: "Name" },
+              { key: "lpn", header: "LPN" },
+              { key: "lot", header: "Lot" },
+              { key: "qty", header: "Qty" },
+              {
+                key: "expiry",
+                header: "Expiry",
+                format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
+              },
+              { key: "locationPath", header: "Location" },
+            ]}
+            pdfProps={() => ({
+              title: "Expiring stock",
+              subtitle: `Pallet items with expiry in the next ${days} days`,
+              organizationName: org.data?.name ?? undefined,
+              columns: [
+                { key: "sku", header: "SKU", width: 14 },
+                { key: "productName", header: "Name", width: 28 },
+                { key: "lpn", header: "LPN", width: 14 },
+                { key: "lot", header: "Lot", width: 10 },
+                { key: "qty", header: "Qty", align: "right", width: 8 },
+                {
+                  key: "expiry",
+                  header: "Expiry",
+                  width: 12,
+                  format: (v) => (v instanceof Date ? v.toLocaleDateString() : ""),
+                },
+                { key: "locationPath", header: "Location", width: 14 },
+              ],
+            })}
+          />
         }
       />
 

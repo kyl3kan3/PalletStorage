@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 
 export default function ProductivityReportPage() {
   const t = theme;
@@ -16,6 +15,7 @@ export default function ProductivityReportPage() {
     to: new Date(),
   });
   const q = trpc.report.operatorProductivity.useQuery(range);
+  const org = trpc.organization.current.useQuery();
   const rows = q.data ?? [];
   const maxTotal = Math.max(1, ...rows.map((r) => r.picks + r.counts));
 
@@ -27,32 +27,40 @@ export default function ProductivityReportPage() {
         title="Operator productivity"
         subtitle="Completed picks and approved cycle counts per user. Zero-activity users are hidden."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `productivity-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  { key: "name", header: "Name" },
-                  { key: "email", header: "Email" },
-                  { key: "picks", header: "Picks" },
-                  { key: "counts", header: "Cycle counts" },
-                  {
-                    key: "picks",
-                    header: "Total",
-                    format: (_, row) => String(row.picks + row.counts),
-                  },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName="productivity"
+            rows={rows}
+            csvColumns={[
+              { key: "name", header: "Name" },
+              { key: "email", header: "Email" },
+              { key: "picks", header: "Picks" },
+              { key: "counts", header: "Cycle counts" },
+              {
+                key: "picks",
+                header: "Total",
+                format: (_, row) => String(row.picks + row.counts),
+              },
+            ]}
+            pdfProps={() => ({
+              title: "Operator productivity",
+              subtitle: "Completed picks and approved cycle counts per user",
+              organizationName: org.data?.name ?? undefined,
+              dateRange: range,
+              columns: [
+                { key: "name", header: "Name", width: 24 },
+                { key: "email", header: "Email", width: 36 },
+                { key: "picks", header: "Picks", align: "right", width: 14 },
+                { key: "counts", header: "Cycle counts", align: "right", width: 14 },
+                {
+                  key: "picks",
+                  header: "Total",
+                  align: "right",
+                  width: 12,
+                  format: (_, row) => String(row.picks + row.counts),
+                },
+              ],
+            })}
+          />
         }
       />
 

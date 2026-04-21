@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 
 export default function ShippedReportPage() {
   const t = theme;
@@ -16,6 +15,7 @@ export default function ShippedReportPage() {
     to: new Date(),
   });
   const q = trpc.report.shippedOrders.useQuery(range);
+  const org = trpc.organization.current.useQuery();
   const rows = q.data ?? [];
   const totalCents = rows.reduce((s, r) => s + (r.totalCents ?? 0), 0);
 
@@ -27,37 +27,55 @@ export default function ShippedReportPage() {
         title="Shipped orders"
         subtitle="Every outbound shipped in the selected window. Picked-qty × unit price gives the line total."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `shipped-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  { key: "reference", header: "Reference" },
-                  { key: "customer", header: "Customer" },
-                  {
-                    key: "shippedAt",
-                    header: "Shipped",
-                    format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
-                  },
-                  { key: "lineCount", header: "Lines" },
-                  { key: "qtyPicked", header: "Qty" },
-                  {
-                    key: "totalCents",
-                    header: "Total ($)",
-                    format: (v) => (typeof v === "number" ? (v / 100).toFixed(2) : "0"),
-                  },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName="shipped"
+            rows={rows}
+            csvColumns={[
+              { key: "reference", header: "Reference" },
+              { key: "customer", header: "Customer" },
+              {
+                key: "shippedAt",
+                header: "Shipped",
+                format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
+              },
+              { key: "lineCount", header: "Lines" },
+              { key: "qtyPicked", header: "Qty" },
+              {
+                key: "totalCents",
+                header: "Total ($)",
+                format: (v) => (typeof v === "number" ? (v / 100).toFixed(2) : "0"),
+              },
+            ]}
+            pdfProps={() => ({
+              title: "Shipped orders",
+              subtitle: "Outbound orders shipped in the selected window",
+              organizationName: org.data?.name ?? undefined,
+              dateRange: range,
+              columns: [
+                { key: "reference", header: "Reference", width: 18 },
+                { key: "customer", header: "Customer", width: 28 },
+                {
+                  key: "shippedAt",
+                  header: "Shipped",
+                  width: 14,
+                  format: (v) => (v instanceof Date ? v.toLocaleDateString() : "—"),
+                },
+                { key: "lineCount", header: "Lines", align: "right", width: 8 },
+                { key: "qtyPicked", header: "Qty", align: "right", width: 10 },
+                {
+                  key: "totalCents",
+                  header: "Total",
+                  align: "right",
+                  width: 22,
+                  format: (v) =>
+                    typeof v === "number" ? `$${(v / 100).toFixed(2)}` : "$0.00",
+                },
+              ],
+              footerNotes: [
+                `Grand total: $${(totalCents / 100).toFixed(2)} across ${rows.length} order(s)`,
+              ],
+            })}
+          />
         }
       />
 

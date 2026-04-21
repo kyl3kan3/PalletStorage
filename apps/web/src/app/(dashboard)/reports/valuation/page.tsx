@@ -2,14 +2,14 @@
 
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, StatBig, Tag } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle, StatBig, Tag } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 
 export default function ValuationReportPage() {
   const t = theme;
   const q = trpc.report.inventoryValuation.useQuery();
+  const org = trpc.organization.current.useQuery();
   const rows = q.data ?? [];
   const totalCents = rows.reduce((s, r) => s + r.valueCents, 0);
   const totalQty = rows.reduce((s, r) => s + r.qty, 0);
@@ -23,38 +23,55 @@ export default function ValuationReportPage() {
         title="Inventory valuation"
         subtitle="On-hand qty × unit price for every SKU. SKUs without a price valuation show as $0 — set prices on /products."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `valuation-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  { key: "sku", header: "SKU" },
-                  { key: "name", header: "Name" },
-                  { key: "qty", header: "On hand" },
-                  {
-                    key: "unitPriceCents",
-                    header: "Unit price ($)",
-                    format: (v) =>
-                      typeof v === "number" ? (v / 100).toFixed(2) : "0",
-                  },
-                  {
-                    key: "valueCents",
-                    header: "Value ($)",
-                    format: (v) =>
-                      typeof v === "number" ? (v / 100).toFixed(2) : "0",
-                  },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName="valuation"
+            rows={rows}
+            csvColumns={[
+              { key: "sku", header: "SKU" },
+              { key: "name", header: "Name" },
+              { key: "qty", header: "On hand" },
+              {
+                key: "unitPriceCents",
+                header: "Unit price ($)",
+                format: (v) => (typeof v === "number" ? (v / 100).toFixed(2) : "0"),
+              },
+              {
+                key: "valueCents",
+                header: "Value ($)",
+                format: (v) => (typeof v === "number" ? (v / 100).toFixed(2) : "0"),
+              },
+            ]}
+            pdfProps={() => ({
+              title: "Inventory valuation",
+              subtitle: "On-hand qty × unit price by SKU",
+              organizationName: org.data?.name ?? undefined,
+              columns: [
+                { key: "sku", header: "SKU", width: 18 },
+                { key: "name", header: "Name", width: 40 },
+                { key: "qty", header: "On hand", align: "right", width: 12 },
+                {
+                  key: "unitPriceCents",
+                  header: "Unit price",
+                  align: "right",
+                  width: 14,
+                  format: (v) =>
+                    typeof v === "number" ? `$${(v / 100).toFixed(2)}` : "$0.00",
+                },
+                {
+                  key: "valueCents",
+                  header: "Value",
+                  align: "right",
+                  width: 16,
+                  format: (v) =>
+                    typeof v === "number" ? `$${(v / 100).toFixed(2)}` : "$0.00",
+                },
+              ],
+              footerNotes: [
+                `Total value: $${(totalCents / 100).toFixed(2)}`,
+                `${pricedSkus} of ${rows.length} SKUs have a unit price set.`,
+              ],
+            })}
+          />
         }
       />
 

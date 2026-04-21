@@ -7,11 +7,10 @@ import { trpc } from "~/lib/trpc";
 
 type MovementRow = inferRouterOutputs<AppRouter>["report"]["movementLog"][number];
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, Tag } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle, Tag } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 import { movementReasonTone } from "~/lib/statusTone";
 
 const REASONS = [
@@ -40,6 +39,7 @@ export default function MovementsReportPage() {
     limit: 500,
   });
   const rows: MovementRow[] = q.data ?? [];
+  const org = trpc.organization.current.useQuery();
 
   const toggle = (r: Reason) =>
     setReasons((prev) =>
@@ -54,33 +54,56 @@ export default function MovementsReportPage() {
         title="Movement log"
         subtitle="The full ledger — every receive, putaway, pick, ship, and count. Filter by reason and date."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `movements-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  {
-                    key: "createdAt",
-                    header: "When",
-                    format: (v) => (v instanceof Date ? v.toISOString() : ""),
-                  },
-                  { key: "reason", header: "Reason" },
-                  { key: "palletId", header: "Pallet" },
-                  { key: "fromLocationId", header: "From" },
-                  { key: "toLocationId", header: "To" },
-                  { key: "notes", header: "Notes" },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName="movements"
+            rows={rows}
+            csvColumns={[
+              {
+                key: "createdAt",
+                header: "When",
+                format: (v) => (v instanceof Date ? v.toISOString() : ""),
+              },
+              { key: "reason", header: "Reason" },
+              { key: "palletId", header: "Pallet" },
+              { key: "fromLocationId", header: "From" },
+              { key: "toLocationId", header: "To" },
+              { key: "notes", header: "Notes" },
+            ]}
+            pdfProps={() => ({
+              title: "Movement log",
+              subtitle: "Audit trail across the ledger",
+              organizationName: org.data?.name ?? undefined,
+              dateRange: range,
+              columns: [
+                {
+                  key: "createdAt",
+                  header: "When",
+                  width: 18,
+                  format: (v) => (v instanceof Date ? v.toLocaleString() : ""),
+                },
+                { key: "reason", header: "Reason", width: 12 },
+                {
+                  key: "palletId",
+                  header: "Pallet",
+                  width: 12,
+                  format: (v) => (typeof v === "string" ? v.slice(0, 8) : ""),
+                },
+                {
+                  key: "fromLocationId",
+                  header: "From",
+                  width: 12,
+                  format: (v) => (typeof v === "string" ? v.slice(0, 8) : "—"),
+                },
+                {
+                  key: "toLocationId",
+                  header: "To",
+                  width: 12,
+                  format: (v) => (typeof v === "string" ? v.slice(0, 8) : "—"),
+                },
+                { key: "notes", header: "Notes", width: 34 },
+              ],
+            })}
+          />
         }
       />
 

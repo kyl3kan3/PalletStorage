@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, Tag } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, PageTitle, Tag } from "~/components/kit";
 import { ReportsNav } from "~/components/reports-nav";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
-import { downloadCsv } from "~/lib/csv";
+import { ReportExports } from "~/components/report-exports";
 
 export default function ReceivedReportPage() {
   const t = theme;
@@ -16,6 +15,7 @@ export default function ReceivedReportPage() {
     to: new Date(),
   });
   const q = trpc.report.receivedOrders.useQuery(range);
+  const org = trpc.organization.current.useQuery();
   const rows = q.data ?? [];
 
   return (
@@ -26,39 +26,54 @@ export default function ReceivedReportPage() {
         title="Received orders"
         subtitle="Every inbound closed in the selected window, with expected vs received and any short-close reason."
         right={
-          <Btn
-            t={t}
-            variant="secondary"
-            size="sm"
-            icon={Ic.Download}
-            disabled={rows.length === 0}
-            onClick={() =>
-              downloadCsv(
-                `received-${new Date().toISOString().slice(0, 10)}.csv`,
-                rows,
-                [
-                  { key: "reference", header: "Reference" },
-                  { key: "supplier", header: "Supplier" },
-                  {
-                    key: "closedAt",
-                    header: "Closed",
-                    format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
-                  },
-                  { key: "qtyExpected", header: "Expected" },
-                  { key: "qtyReceived", header: "Received" },
-                  {
-                    key: "qtyReceived",
-                    header: "Variance",
-                    format: (_, row) =>
-                      String((row.qtyReceived ?? 0) - (row.qtyExpected ?? 0)),
-                  },
-                  { key: "closeReason", header: "Close reason" },
-                ],
-              )
-            }
-          >
-            Download CSV
-          </Btn>
+          <ReportExports
+            baseName="received"
+            rows={rows}
+            csvColumns={[
+              { key: "reference", header: "Reference" },
+              { key: "supplier", header: "Supplier" },
+              {
+                key: "closedAt",
+                header: "Closed",
+                format: (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : ""),
+              },
+              { key: "qtyExpected", header: "Expected" },
+              { key: "qtyReceived", header: "Received" },
+              {
+                key: "qtyReceived",
+                header: "Variance",
+                format: (_, row) => String((row.qtyReceived ?? 0) - (row.qtyExpected ?? 0)),
+              },
+              { key: "closeReason", header: "Close reason" },
+            ]}
+            pdfProps={() => ({
+              title: "Received orders",
+              subtitle: "Inbound orders closed in the selected window",
+              organizationName: org.data?.name ?? undefined,
+              dateRange: range,
+              columns: [
+                { key: "reference", header: "Reference", width: 16 },
+                { key: "supplier", header: "Supplier", width: 24 },
+                {
+                  key: "closedAt",
+                  header: "Closed",
+                  width: 12,
+                  format: (v) => (v instanceof Date ? v.toLocaleDateString() : "—"),
+                },
+                { key: "qtyExpected", header: "Expected", align: "right", width: 10 },
+                { key: "qtyReceived", header: "Received", align: "right", width: 10 },
+                {
+                  key: "qtyReceived",
+                  header: "Variance",
+                  align: "right",
+                  width: 10,
+                  format: (_, row) =>
+                    String((row.qtyReceived ?? 0) - (row.qtyExpected ?? 0)),
+                },
+                { key: "closeReason", header: "Close reason", width: 18 },
+              ],
+            })}
+          />
         }
       />
 
