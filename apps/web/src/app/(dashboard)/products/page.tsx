@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
-import { Button, Card, Input, PageHeader, Table, Td, Th } from "~/components/ui";
+import { theme, FONTS } from "~/lib/theme";
+import { Btn, Card, PageTitle, Search, Tag, TextField } from "~/components/kit";
+import { Ic } from "~/components/icons";
 
 export default function ProductsPage() {
+  const t = theme;
   const utils = trpc.useUtils();
   const [q, setQ] = useState("");
   const list = trpc.product.search.useQuery({ q, limit: 50 });
@@ -38,7 +41,13 @@ export default function ProductsPage() {
       alert("CSV must have at least `sku` and `name` columns");
       return;
     }
-    type Row = { sku: string; name: string; barcode?: string; weightKg?: number; velocityClass?: "A" | "B" | "C" };
+    type Row = {
+      sku: string;
+      name: string;
+      barcode?: string;
+      weightKg?: number;
+      velocityClass?: "A" | "B" | "C";
+    };
     const products: Row[] = rows
       .map((row): Row | null => {
         const cells = row.split(",").map((c) => c.trim());
@@ -68,18 +77,30 @@ export default function ProductsPage() {
 
   return (
     <div>
-      <PageHeader title="Products">
-        <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-          <span className="rounded-md border border-slate-300 bg-white px-3 py-1.5 shadow-sm hover:bg-slate-50">
-            {bulk.isPending ? "Importing..." : "Import CSV"}
-          </span>
-          <input type="file" accept=".csv,text/csv" onChange={onFile} className="hidden" />
-        </label>
-      </PageHeader>
+      <PageTitle
+        eyebrow="Catalog"
+        title="Products"
+        subtitle="SKUs, barcodes, and velocity classes."
+        right={
+          <label style={{ display: "inline-flex", cursor: "pointer" }}>
+            <span>
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Download}>
+                {bulk.isPending ? "Importing…" : "Import CSV"}
+              </Btn>
+            </span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={onFile}
+              style={{ display: "none" }}
+            />
+          </label>
+        }
+      />
 
-      <Card>
+      <Card t={t}>
         <form
-          className="flex flex-wrap items-end gap-3"
+          style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}
           onSubmit={(e) => {
             e.preventDefault();
             create.mutate({ sku, name, barcode: barcode || undefined });
@@ -88,52 +109,133 @@ export default function ProductsPage() {
             setBarcode("");
           }}
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">SKU</span>
-            <Input value={sku} onChange={(e) => setSku(e.target.value)} required />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Name</span>
-            <Input value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Barcode</span>
-            <Input value={barcode} onChange={(e) => setBarcode(e.target.value)} />
-          </label>
-          <Button type="submit" disabled={create.isPending}>
+          <Field label="SKU">
+            <TextField
+              t={t}
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              placeholder="SKU-00001"
+              required
+            />
+          </Field>
+          <Field label="Name">
+            <TextField
+              t={t}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Widget"
+              required
+            />
+          </Field>
+          <Field label="Barcode">
+            <TextField
+              t={t}
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="optional"
+            />
+          </Field>
+          <Btn t={t} variant="accent" size="md" icon={Ic.Plus} type="submit" disabled={create.isPending}>
             Add product
-          </Button>
+          </Btn>
         </form>
       </Card>
 
-      <div className="mt-6">
-        <Input
-          placeholder="Search SKU, name, or barcode..."
+      <div style={{ marginTop: 20, marginBottom: 12 }}>
+        <Search
+          t={t}
           value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="mb-3 w-80"
+          placeholder="Search SKU, name, or barcode…"
+          width={360}
+          onChange={setQ}
         />
-        <Table>
-          <thead>
-            <tr>
-              <Th>SKU</Th>
-              <Th>Name</Th>
-              <Th>Barcode</Th>
-              <Th>Weight (kg)</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.data?.map((p) => (
-              <tr key={p.id}>
-                <Td>{p.sku}</Td>
-                <Td>{p.name}</Td>
-                <Td>{p.barcode ?? ""}</Td>
-                <Td>{p.weightKg ?? ""}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
       </div>
+
+      <Card t={t} padding={0}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "160px 1fr 160px 100px",
+            gap: 16,
+            padding: "14px 20px",
+            fontSize: 11,
+            color: t.muted,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            fontWeight: 600,
+          }}
+        >
+          <div>SKU</div>
+          <div>Name</div>
+          <div>Barcode</div>
+          <div>Weight</div>
+        </div>
+        {(list.data?.length ?? 0) === 0 && (
+          <div
+            style={{
+              padding: "28px 20px",
+              color: t.muted,
+              fontSize: 13,
+              borderTop: `1.5px dashed ${t.border}`,
+              textAlign: "center",
+            }}
+          >
+            No products match.
+          </div>
+        )}
+        {list.data?.map((p) => (
+          <div
+            key={p.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr 160px 100px",
+              gap: 16,
+              padding: "12px 20px",
+              alignItems: "center",
+              borderTop: `1.5px dashed ${t.border}`,
+              fontSize: 13.5,
+              color: t.body,
+            }}
+          >
+            <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>{p.sku}</span>
+            <span>
+              {p.name}
+              {p.velocityClass && (
+                <span style={{ marginLeft: 8 }}>
+                  <Tag t={t} tone={p.velocityClass === "A" ? "primary" : p.velocityClass === "B" ? "sky" : "neutral"}>
+                    {p.velocityClass}
+                  </Tag>
+                </span>
+              )}
+            </span>
+            <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.muted }}>
+              {p.barcode ?? "—"}
+            </span>
+            <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+              {p.weightKg ?? "—"}
+            </span>
+          </div>
+        ))}
+      </Card>
     </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span
+        style={{
+          fontSize: 11,
+          color: theme.muted,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }

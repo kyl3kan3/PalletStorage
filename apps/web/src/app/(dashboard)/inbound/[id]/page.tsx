@@ -2,9 +2,13 @@
 
 import { use, useState } from "react";
 import { trpc } from "~/lib/trpc";
-import { Button, Card, Input, PageHeader, Table, Td, Th } from "~/components/ui";
+import { theme, FONTS } from "~/lib/theme";
+import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
+import { Ic } from "~/components/icons";
+import { inboundStatusTone } from "~/lib/statusTone";
 
 export default function InboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const t = theme;
   const { id } = use(params);
   const utils = trpc.useUtils();
   const detail = trpc.inbound.byId.useQuery({ id });
@@ -28,120 +32,196 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div>
-      <PageHeader title={`Inbound ${id.slice(0, 8)}`}>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs uppercase tracking-wide text-slate-600">
-          {status}
-        </span>
-      </PageHeader>
+      <PageTitle
+        eyebrow={order?.reference ? `Ref ${order.reference}` : "Inbound"}
+        title={`Inbound ${id.slice(0, 8)}`}
+        right={
+          <Tag t={t} tone={inboundStatusTone(status)}>
+            {status}
+          </Tag>
+        }
+      />
 
-      <Card>
-        <div className="mb-4">
-          <div className="text-sm text-slate-500">Reference</div>
-          <div className="font-medium">{order?.reference ?? "…"}</div>
+      {/* Lines table */}
+      <Card t={t} padding={0}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "60px 1fr 1fr 1fr",
+            gap: 16,
+            padding: "14px 20px",
+            fontSize: 11,
+            color: t.muted,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            fontWeight: 600,
+          }}
+        >
+          <div>Line</div>
+          <div>Expected</div>
+          <div>Received</div>
+          <div>Variance</div>
         </div>
-
-        <Table>
-          <thead>
-            <tr>
-              <Th>Line</Th>
-              <Th>Expected</Th>
-              <Th>Received</Th>
-              <Th>Variance</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => {
-              const v = l.qtyReceived - l.qtyExpected;
-              return (
-                <tr key={l.id}>
-                  <Td>{i + 1}</Td>
-                  <Td>{l.qtyExpected}</Td>
-                  <Td>{l.qtyReceived}</Td>
-                  <Td>
-                    <span className={v < 0 ? "text-amber-700" : ""}>{v}</span>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
+        {lines.map((l, i) => {
+          const v = l.qtyReceived - l.qtyExpected;
+          return (
+            <div
+              key={l.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "60px 1fr 1fr 1fr",
+                gap: 16,
+                padding: "12px 20px",
+                alignItems: "center",
+                borderTop: `1.5px dashed ${t.border}`,
+              }}
+            >
+              <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>#{i + 1}</span>
+              <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                {l.qtyExpected}
+              </span>
+              <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                {l.qtyReceived}
+              </span>
+              <span>
+                {v === 0 ? (
+                  <Tag t={t} tone="mint">
+                    on target
+                  </Tag>
+                ) : v < 0 ? (
+                  <Tag t={t} tone="coral">
+                    short {v}
+                  </Tag>
+                ) : (
+                  <Tag t={t} tone="sky">
+                    over +{v}
+                  </Tag>
+                )}
+              </span>
+            </div>
+          );
+        })}
+        {lines.length === 0 && (
+          <div
+            style={{
+              padding: "24px 20px",
+              borderTop: `1.5px dashed ${t.border}`,
+              color: t.muted,
+              fontSize: 13,
+            }}
+          >
+            No lines on this order.
+          </div>
+        )}
       </Card>
 
       {!isTerminal && (
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Card>
-            <div className="mb-2 font-medium">Close order</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+          <Card t={t}>
+            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Close order</div>
             {hasShort && (
-              <p className="mb-2 text-sm text-amber-700">
-                Some lines are under-received — a reason is required to short-close.
-              </p>
+              <div
+                style={{
+                  marginBottom: 10,
+                  fontSize: 12,
+                  color: t.coral,
+                  background: t.coralSoft,
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                }}
+              >
+                Under-received — a reason is required to short-close.
+              </div>
             )}
-            <div className="flex gap-2">
-              <Input
+            <div style={{ display: "flex", gap: 8 }}>
+              <TextField
+                t={t}
                 placeholder={hasShort ? "Short-close reason (required)" : "Reason (optional)"}
                 value={closeReason}
                 onChange={(e) => setCloseReason(e.target.value)}
+                style={{ flex: 1 }}
               />
-              <Button
+              <Btn
+                t={t}
+                variant="primary"
+                size="md"
+                icon={Ic.Check}
                 disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
                 onClick={() =>
-                  closeOrder.mutate({
-                    id,
-                    closeReason: closeReason.trim() || undefined,
-                  })
+                  closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
                 }
               >
-                {closeOrder.isPending ? "Closing..." : "Close"}
-              </Button>
+                {closeOrder.isPending ? "Closing…" : "Close"}
+              </Btn>
             </div>
             {closeOrder.error && (
-              <p className="mt-2 text-sm text-red-700">{closeOrder.error.message}</p>
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+                {closeOrder.error.message}
+              </div>
             )}
           </Card>
 
-          <Card>
-            <div className="mb-2 font-medium">Cancel order</div>
-            <div className="flex gap-2">
-              <Input
+          <Card t={t}>
+            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Cancel order</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <TextField
+                t={t}
                 placeholder="Cancel reason (required)"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
+                style={{ flex: 1 }}
               />
-              <Button
+              <Btn
+                t={t}
+                variant="danger"
+                size="md"
+                icon={Ic.X}
                 disabled={cancelOrder.isPending || !cancelReason.trim()}
                 onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
               >
-                {cancelOrder.isPending ? "Cancelling..." : "Cancel"}
-              </Button>
+                {cancelOrder.isPending ? "Cancelling…" : "Cancel"}
+              </Btn>
             </div>
             {cancelOrder.error && (
-              <p className="mt-2 text-sm text-red-700">{cancelOrder.error.message}</p>
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+                {cancelOrder.error.message}
+              </div>
             )}
           </Card>
         </div>
       )}
 
       {isTerminal && order?.closeReason && (
-        <Card>
-          <div className="text-sm text-slate-500">Reason</div>
-          <div>{order.closeReason}</div>
-        </Card>
+        <div style={{ marginTop: 16 }}>
+          <Card t={t} tint="coral">
+            <div style={{ fontSize: 11, color: t.muted, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+              Reason
+            </div>
+            <div style={{ color: t.ink, marginTop: 4 }}>{order.closeReason}</div>
+          </Card>
+        </div>
       )}
 
-      <div className="mt-4">
-        <Card>
-          <div className="flex gap-2">
-            <Button
+      <div style={{ marginTop: 16 }}>
+        <Card t={t}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <Btn
+              t={t}
+              variant="secondary"
+              size="md"
+              icon={Ic.Download}
               disabled={!qbStatus.data?.connected || exportInbound.isPending || status !== "closed"}
               onClick={() => exportInbound.mutate({ inboundOrderId: id })}
             >
-              {exportInbound.isPending ? "Exporting..." : "Export to QuickBooks"}
-            </Button>
+              {exportInbound.isPending ? "Exporting…" : "Export to QuickBooks"}
+            </Btn>
             {exportInbound.data && (
-              <span className="text-sm text-green-700">Exported as Bill {exportInbound.data.qboId}</span>
+              <Tag t={t} tone="mint">
+                Exported as Bill {exportInbound.data.qboId}
+              </Tag>
             )}
             {exportInbound.error && (
-              <span className="text-sm text-red-700">{exportInbound.error.message}</span>
+              <span style={{ fontSize: 12, color: t.coral }}>{exportInbound.error.message}</span>
             )}
           </div>
         </Card>

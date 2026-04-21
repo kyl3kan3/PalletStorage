@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
-import { Button, Card, Input, PageHeader, Table, Td, Th } from "~/components/ui";
+import { theme, FONTS } from "~/lib/theme";
+import { Btn, Card, PageTitle, TextField } from "~/components/kit";
+import { Ic } from "~/components/icons";
 
 interface Line {
   productId: string;
@@ -11,6 +13,7 @@ interface Line {
 }
 
 export default function NewOutboundPage() {
+  const t = theme;
   const router = useRouter();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
@@ -25,105 +28,179 @@ export default function NewOutboundPage() {
 
   return (
     <div>
-      <PageHeader title="New outbound order" />
-      <Card>
+      <PageTitle eyebrow="Create a sales order" title="New outbound order" />
+
+      <Card t={t}>
         <form
-          className="flex flex-col gap-4"
+          style={{ display: "flex", flexDirection: "column", gap: 18 }}
           onSubmit={(e) => {
             e.preventDefault();
             create.mutate({ warehouseId, reference, customer: customer || undefined, lines });
           }}
         >
-          <div className="grid grid-cols-3 gap-4">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Warehouse</span>
-              <select
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+            <Field label="Warehouse">
+              <Select
                 value={warehouseId}
                 onChange={(e) => setWarehouseId(e.target.value)}
                 required
               >
-                <option value="">Select...</option>
+                <option value="">Select…</option>
                 {warehouses.data?.map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.code} — {w.name}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Reference</span>
-              <Input value={reference} onChange={(e) => setReference(e.target.value)} required />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Customer</span>
-              <Input value={customer} onChange={(e) => setCustomer(e.target.value)} />
-            </label>
+              </Select>
+            </Field>
+            <Field label="Reference">
+              <TextField
+                t={t}
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Customer">
+              <TextField
+                t={t}
+                value={customer}
+                onChange={(e) => setCustomer(e.target.value)}
+              />
+            </Field>
           </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-medium">Lines</h3>
-              <Button
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Lines</div>
+              <Btn
+                t={t}
+                variant="secondary"
+                size="sm"
+                icon={Ic.Plus}
                 type="button"
                 onClick={() =>
                   setLines([...lines, { productId: products.data?.[0]?.id ?? "", qtyOrdered: 1 }])
                 }
               >
                 Add line
-              </Button>
+              </Btn>
             </div>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Product</Th>
-                  <Th>Qty ordered</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => (
-                  <tr key={i}>
-                    <Td>
-                      <select
-                        className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-                        value={l.productId}
-                        onChange={(e) =>
-                          setLines(lines.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))
-                        }
-                      >
-                        {products.data?.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.sku} — {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Td>
-                    <Td>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={l.qtyOrdered}
-                        className="w-24"
-                        onChange={(e) =>
-                          setLines(
-                            lines.map((x, j) =>
-                              j === i ? { ...x, qtyOrdered: Number(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+
+            {lines.length === 0 && (
+              <div
+                style={{
+                  background: t.surfaceAlt,
+                  borderRadius: 12,
+                  padding: "16px",
+                  border: `1.5px dashed ${t.border}`,
+                  color: t.muted,
+                  fontSize: 13,
+                  textAlign: "center",
+                }}
+              >
+                No lines yet.
+              </div>
+            )}
+
+            {lines.map((l, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 120px",
+                  gap: 10,
+                  padding: "10px 0",
+                  borderTop: i === 0 ? "none" : `1.5px dashed ${t.border}`,
+                  alignItems: "center",
+                }}
+              >
+                <Select
+                  value={l.productId}
+                  onChange={(e) =>
+                    setLines(lines.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))
+                  }
+                >
+                  {products.data?.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.sku} — {p.name}
+                    </option>
+                  ))}
+                </Select>
+                <TextField
+                  t={t}
+                  type="number"
+                  min={1}
+                  value={l.qtyOrdered}
+                  style={{ width: 120 }}
+                  onChange={(e) =>
+                    setLines(
+                      lines.map((x, j) =>
+                        j === i ? { ...x, qtyOrdered: Number(e.target.value) } : x,
+                      ),
+                    )
+                  }
+                />
+              </div>
+            ))}
           </div>
 
-          <Button type="submit" disabled={create.isPending || lines.length === 0}>
-            Create order
-          </Button>
+          <div>
+            <Btn
+              t={t}
+              variant="accent"
+              size="md"
+              icon={Ic.Check}
+              type="submit"
+              disabled={create.isPending || lines.length === 0}
+            >
+              {create.isPending ? "Creating…" : "Create order"}
+            </Btn>
+          </div>
         </form>
       </Card>
     </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span
+        style={{
+          fontSize: 11,
+          color: theme.muted,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Select({
+  style,
+  ...rest
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      {...rest}
+      style={{
+        padding: "9px 14px",
+        borderRadius: 12,
+        background: theme.surfaceAlt,
+        border: `1.5px solid ${theme.border}`,
+        outline: "none",
+        fontFamily: FONTS.sans,
+        fontSize: 13.5,
+        color: theme.ink,
+        cursor: "pointer",
+        ...(style || {}),
+      }}
+    />
   );
 }

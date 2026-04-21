@@ -2,9 +2,13 @@
 
 import { use, useState } from "react";
 import { trpc } from "~/lib/trpc";
-import { Button, Card, Input, PageHeader, Table, Td, Th } from "~/components/ui";
+import { theme, FONTS } from "~/lib/theme";
+import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
+import { Ic } from "~/components/icons";
+import { outboundStatusTone } from "~/lib/statusTone";
 
 export default function OutboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const t = theme;
   const { id } = use(params);
   const utils = trpc.useUtils();
   const detail = trpc.outbound.byId.useQuery({ id });
@@ -39,75 +43,135 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div>
-      <PageHeader title={`Outbound ${id.slice(0, 8)}`}>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs uppercase tracking-wide text-slate-600">
-          {status}
-        </span>
-      </PageHeader>
+      <PageTitle
+        eyebrow={order?.reference ? `Ref ${order.reference} · ${order.customer ?? "—"}` : "Outbound"}
+        title={`Outbound ${id.slice(0, 8)}`}
+        right={
+          <Tag t={t} tone={outboundStatusTone(status)}>
+            {status}
+          </Tag>
+        }
+      />
 
-      <Card>
-        <div className="mb-4">
-          <div className="text-sm text-slate-500">Reference</div>
-          <div className="font-medium">{order?.reference ?? "…"}</div>
+      <Card t={t} padding={0}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "60px 1fr 1fr 1fr",
+            gap: 16,
+            padding: "14px 20px",
+            fontSize: 11,
+            color: t.muted,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            fontWeight: 600,
+          }}
+        >
+          <div>Line</div>
+          <div>Ordered</div>
+          <div>Picked</div>
+          <div>Fill</div>
         </div>
-        <Table>
-          <thead>
-            <tr>
-              <Th>Line</Th>
-              <Th>Ordered</Th>
-              <Th>Picked</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <tr key={l.id}>
-                <Td>{i + 1}</Td>
-                <Td>{l.qtyOrdered}</Td>
-                <Td>{l.qtyPicked}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        {lines.map((l, i) => {
+          const pct = l.qtyOrdered > 0 ? Math.min(1, l.qtyPicked / l.qtyOrdered) : 0;
+          return (
+            <div
+              key={l.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "60px 1fr 1fr 1fr",
+                gap: 16,
+                padding: "12px 20px",
+                alignItems: "center",
+                borderTop: `1.5px dashed ${t.border}`,
+              }}
+            >
+              <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>#{i + 1}</span>
+              <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                {l.qtyOrdered}
+              </span>
+              <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                {l.qtyPicked}
+              </span>
+              <span>
+                <Tag t={t} tone={pct === 1 ? "mint" : pct > 0 ? "primary" : "neutral"}>
+                  {Math.round(pct * 100)}%
+                </Tag>
+              </span>
+            </div>
+          );
+        })}
+        {lines.length === 0 && (
+          <div
+            style={{
+              padding: "24px 20px",
+              borderTop: `1.5px dashed ${t.border}`,
+              color: t.muted,
+              fontSize: 13,
+            }}
+          >
+            No lines on this order.
+          </div>
+        )}
       </Card>
 
       {!isTerminal && (
-        <div className="mt-4">
-          <Card>
-            <div className="flex flex-wrap gap-2">
-              <Button
+        <div style={{ marginTop: 16 }}>
+          <Card t={t}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <Btn
+                t={t}
+                variant="primary"
+                size="md"
+                icon={Ic.Spark}
                 onClick={() => genPicks.mutate({ outboundOrderId: id })}
                 disabled={genPicks.isPending || (status !== "open" && status !== "draft")}
               >
-                {genPicks.isPending ? "Generating..." : "Generate picks"}
-              </Button>
+                {genPicks.isPending ? "Generating…" : "Generate picks"}
+              </Btn>
               {genPicks.data && (
-                <span className="text-sm text-green-700">Created {genPicks.data.created} pick(s)</span>
+                <Tag t={t} tone="mint">
+                  Created {genPicks.data.created} pick(s)
+                </Tag>
               )}
-
-              <Button
-                onClick={() => pack.mutate({ id })}
+              <Btn
+                t={t}
+                variant="secondary"
+                size="md"
+                icon={Ic.Package}
                 disabled={pack.isPending || status !== "picking"}
+                onClick={() => pack.mutate({ id })}
               >
-                {pack.isPending ? "Packing..." : "Mark packed"}
-              </Button>
-              {pack.error && <span className="text-sm text-red-700">{pack.error.message}</span>}
+                {pack.isPending ? "Packing…" : "Mark packed"}
+              </Btn>
+              {pack.error && <span style={{ fontSize: 12, color: t.coral }}>{pack.error.message}</span>}
             </div>
           </Card>
         </div>
       )}
 
       {status === "packed" && (
-        <div className="mt-4">
-          <Card>
-            <div className="mb-2 font-medium">Ship</div>
-            <div className="flex flex-wrap gap-2">
-              <Input placeholder="Carrier" value={carrier} onChange={(e) => setCarrier(e.target.value)} />
-              <Input
+        <div style={{ marginTop: 16 }}>
+          <Card t={t} tint="primary">
+            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 10 }}>Ready to ship</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <TextField
+                t={t}
+                placeholder="Carrier"
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+              />
+              <TextField
+                t={t}
                 placeholder="Tracking number"
                 value={tracking}
                 onChange={(e) => setTracking(e.target.value)}
               />
-              <Button
+              <Btn
+                t={t}
+                variant="accent"
+                size="md"
+                icon={Ic.Truck}
                 disabled={ship.isPending}
                 onClick={() =>
                   ship.mutate({
@@ -117,97 +181,137 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   })
                 }
               >
-                {ship.isPending ? "Shipping..." : "Confirm ship"}
-              </Button>
+                {ship.isPending ? "Shipping…" : "Confirm ship"}
+              </Btn>
             </div>
-            {ship.error && <p className="mt-2 text-sm text-red-700">{ship.error.message}</p>}
-          </Card>
-        </div>
-      )}
-
-      {shipmentsQ.data && shipmentsQ.data.length > 0 && (
-        <div className="mt-4">
-          <Card>
-            <div className="mb-2 font-medium">Shipments</div>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>BOL</Th>
-                  <Th>Carrier</Th>
-                  <Th>Tracking</Th>
-                  <Th>Shipped</Th>
-                  <Th>BOL PDF</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {shipmentsQ.data.map((s) => (
-                  <tr key={s.id}>
-                    <Td>{s.bolNumber}</Td>
-                    <Td>{s.carrier ?? ""}</Td>
-                    <Td>{s.trackingNumber ?? ""}</Td>
-                    <Td>{s.shippedAt.toLocaleDateString()}</Td>
-                    <Td>
-                      <a
-                        href={`/api/shipments/${s.id}/bol.pdf`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        Download
-                      </a>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            {ship.error && (
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>{ship.error.message}</div>
+            )}
           </Card>
         </div>
       )}
 
       {canCancel && (
-        <div className="mt-4">
-          <Card>
-            <div className="mb-2 font-medium">Cancel order</div>
-            <div className="flex gap-2">
-              <Input
+        <div style={{ marginTop: 16 }}>
+          <Card t={t}>
+            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Cancel order</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <TextField
+                t={t}
                 placeholder="Cancel reason (required)"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
+                style={{ flex: 1 }}
               />
-              <Button
+              <Btn
+                t={t}
+                variant="danger"
+                size="md"
+                icon={Ic.X}
                 disabled={cancelOrder.isPending || !cancelReason.trim()}
                 onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
               >
-                {cancelOrder.isPending ? "Cancelling..." : "Cancel"}
-              </Button>
+                {cancelOrder.isPending ? "Cancelling…" : "Cancel"}
+              </Btn>
             </div>
             {cancelOrder.error && (
-              <p className="mt-2 text-sm text-red-700">{cancelOrder.error.message}</p>
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+                {cancelOrder.error.message}
+              </div>
             )}
           </Card>
         </div>
       )}
 
       {status === "cancelled" && order?.cancelReason && (
-        <div className="mt-4">
-          <Card>
-            <div className="text-sm text-slate-500">Cancel reason</div>
-            <div>{order.cancelReason}</div>
+        <div style={{ marginTop: 16 }}>
+          <Card t={t} tint="coral">
+            <div style={{ fontSize: 11, color: t.muted, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+              Cancel reason
+            </div>
+            <div style={{ color: t.ink, marginTop: 4 }}>{order.cancelReason}</div>
           </Card>
         </div>
       )}
 
-      <div className="mt-4">
-        <Card>
-          <div className="flex gap-2">
-            <Button
+      {shipmentsQ.data && shipmentsQ.data.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Card t={t} padding={0}>
+            <div style={{ padding: "16px 20px 10px", fontWeight: 600, color: t.ink }}>
+              Shipments
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "160px 1fr 1fr 120px 120px",
+                gap: 16,
+                padding: "10px 20px",
+                fontSize: 11,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+                borderTop: `1.5px dashed ${t.border}`,
+              }}
+            >
+              <div>BOL</div>
+              <div>Carrier</div>
+              <div>Tracking</div>
+              <div>Shipped</div>
+              <div>BOL PDF</div>
+            </div>
+            {shipmentsQ.data.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "160px 1fr 1fr 120px 120px",
+                  gap: 16,
+                  padding: "12px 20px",
+                  alignItems: "center",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                  {s.bolNumber}
+                </span>
+                <span>{s.carrier ?? "—"}</span>
+                <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>{s.trackingNumber ?? "—"}</span>
+                <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                  {s.shippedAt.toLocaleDateString()}
+                </span>
+                <a
+                  href={`/api/shipments/${s.id}/bol.pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: t.primaryDeep, fontWeight: 600, textDecoration: "none" }}
+                >
+                  Download →
+                </a>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        <Card t={t}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <Btn
+              t={t}
+              variant="secondary"
+              size="md"
+              icon={Ic.Download}
               disabled={!qbStatus.data?.connected || exportOutbound.isPending || status !== "shipped"}
               onClick={() => exportOutbound.mutate({ outboundOrderId: id })}
             >
-              {exportOutbound.isPending ? "Exporting..." : "Export to QuickBooks"}
-            </Button>
+              {exportOutbound.isPending ? "Exporting…" : "Export to QuickBooks"}
+            </Btn>
             {exportOutbound.data && (
-              <span className="text-sm text-green-700">Exported as Invoice {exportOutbound.data.qboId}</span>
+              <Tag t={t} tone="mint">
+                Exported as Invoice {exportOutbound.data.qboId}
+              </Tag>
             )}
           </div>
         </Card>
