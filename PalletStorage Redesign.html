@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stacks — PalletStorage, redesigned</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: 'Geist', -apple-system, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="brand.jsx"></script>
+<script type="text/babel" src="kit.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="screens/home.jsx"></script>
+<script type="text/babel" src="screens/outbound.jsx"></script>
+<script type="text/babel" src="screens/rest.jsx"></script>
+
+<script type="text/babel">
+  const L = themeFor('light');
+  const D = themeFor('dark');
+
+  function App() {
+    return (
+      <DesignCanvas>
+        <DCSection id="brand" title="Meet Cubby" subtitle="The warehouse mascot. Warm cream, marigold, ink — a serif italic that feels human. Voice: direct, a little warm.">
+          <DCArtboard id="cover" label="Brand — cover" width={1280} height={720}>
+            <div style={{ width: '100%', height: '100%', background: L.bg, padding: 56, position: 'relative', overflow: 'hidden', fontFamily: FONTS.sans }}>
+              <div style={{ position: 'absolute', right: -40, bottom: -60, opacity: 0.12 }}><Cubby size={560} theme={L} /></div>
+              <Wordmark theme={L} size={28} />
+              <div style={{ fontFamily: FONTS.display, fontStyle: 'italic', fontSize: 110, fontWeight: 600, letterSpacing: -4, color: L.ink, lineHeight: 0.95, marginTop: 100, maxWidth: 900 }}>
+                The warehouse that <span style={{ color: L.primary }}>feels</span> good.
+              </div>
+              <div style={{ fontSize: 20, color: L.muted, marginTop: 20, maxWidth: 600, lineHeight: 1.5 }}>A friendly little OS for receiving, storing, counting, and shipping pallets — with a tiny mascot named Cubby along for the ride.</div>
+              <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
+                <Btn theme={L} variant="accent" size="lg" icon={Ic.Lightning}>Open the floor</Btn>
+                <Btn theme={L} variant="secondary" size="lg">Say hi to Cubby</Btn>
+              </div>
+            </div>
+          </DCArtboard>
+          <DCArtboard id="system" label="System" width={1280} height={720}>
+            <div style={{ width: '100%', height: '100%', background: L.bg, padding: 48, fontFamily: FONTS.sans, overflow: 'auto' }}>
+              <div style={{ fontFamily: FONTS.display, fontStyle: 'italic', fontSize: 36, fontWeight: 600, color: L.ink, letterSpacing: -1 }}>The system, at a glance</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 28 }}>
+                <Card theme={L} padding={24}>
+                  <div style={{ fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: L.muted, fontWeight: 600 }}>Palette</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10, marginTop: 10 }}>
+                    {[['Marigold', palette.marigold],['Deep', palette.marigoldDeep],['Coral', palette.coral],['Mint', palette.mint],['Sky', palette.sky],['Lilac', palette.lilac]].map(([n,c])=>(
+                      <div key={n}>
+                        <div style={{ height: 48, background: c, borderRadius: 14, border: `1.5px solid ${L.border}` }} />
+                        <div style={{ fontSize: 11, marginTop: 6, color: L.ink, fontWeight: 600 }}>{n}</div>
+                        <div style={{ fontSize: 10, fontFamily: FONTS.mono, color: L.muted }}>{c}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginTop: 14 }}>
+                    {[['Ink', palette.ink],['Slate', palette.slate],['Pebble', palette.pebble],['Cream', palette.cream]].map(([n,c])=>(
+                      <div key={n}>
+                        <div style={{ height: 36, background: c, borderRadius: 10, border: `1.5px solid ${L.border}` }} />
+                        <div style={{ fontSize: 11, marginTop: 6, color: L.ink, fontWeight: 600 }}>{n}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                <Card theme={L} padding={24}>
+                  <div style={{ fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: L.muted, fontWeight: 600 }}>Type</div>
+                  <div style={{ fontFamily: FONTS.display, fontStyle: 'italic', fontSize: 42, fontWeight: 600, color: L.ink, letterSpacing: -1, marginTop: 6 }}>Fraunces · display</div>
+                  <div style={{ fontFamily: FONTS.sans, fontSize: 18, color: L.body, marginTop: 8 }}>Geist · interface. Calm, legible at small sizes.</div>
+                  <div style={{ fontFamily: FONTS.mono, fontSize: 15, color: L.ink, marginTop: 8 }}>JetBrains Mono · P-9QK4X72L</div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+                    <Btn theme={L} variant="primary" size="sm" icon={Ic.Check}>Primary</Btn>
+                    <Btn theme={L} variant="accent" size="sm" icon={Ic.Plus}>Accent</Btn>
+                    <Btn theme={L} variant="secondary" size="sm">Secondary</Btn>
+                    <Btn theme={L} variant="ghost" size="sm">Ghost</Btn>
+                    <Btn theme={L} variant="danger" size="sm" icon={Ic.X}>Danger</Btn>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                    {['primary','mint','coral','sky','neutral'].map(tn=><Tag key={tn} theme={L} tone={tn}>{tn}</Tag>)}
+                  </div>
+                </Card>
+              </div>
+              <Card theme={L} padding={24} style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: L.muted, fontWeight: 600, marginBottom: 14 }}>Cubby moods</div>
+                <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+                  {['happy','think','wow','sleep'].map(m=>(
+                    <div key={m} style={{ textAlign: 'center' }}>
+                      <Cubby size={72} theme={L} mood={m} />
+                      <div style={{ fontSize: 11, fontFamily: FONTS.mono, marginTop: 4, color: L.muted }}>{m}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="home" title="Home" subtitle="Warm landing — tells you what today looks like.">
+          <DCArtboard id="home-l" label="Light" width={1280} height={900}><ScreenHome theme={L} /></DCArtboard>
+          <DCArtboard id="home-d" label="Dark" width={1280} height={900}><ScreenHome theme={D} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="overview" title="Overview" subtitle="Stories, not tables. Throughput curve, dock-to-stock, top stock, recent moves.">
+          <DCArtboard id="ov-l" label="Light" width={1280} height={1000}><ScreenOverview theme={L} /></DCArtboard>
+          <DCArtboard id="ov-d" label="Dark" width={1280} height={1000}><ScreenOverview theme={D} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="outbound" title="Outbound — hero" subtitle="Pick → pack → ship with Cubby's ETA copy.">
+          <DCArtboard id="out-d-l" label="Detail · Light" width={1280} height={900}><ScreenOutboundDetail theme={L} /></DCArtboard>
+          <DCArtboard id="out-d-d" label="Detail · Dark" width={1280} height={900}><ScreenOutboundDetail theme={D} /></DCArtboard>
+          <DCArtboard id="out-l-l" label="List · Light" width={1280} height={900}><ScreenOutboundList theme={L} /></DCArtboard>
+          <DCArtboard id="out-l-d" label="List · Dark" width={1280} height={900}><ScreenOutboundList theme={D} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="inventory" title="Inventory · Scan" subtitle="Big editorial headline, one huge scan field, one lovely result card.">
+          <DCArtboard id="inv-l" label="Light" width={1280} height={820}><ScreenInventory theme={L} /></DCArtboard>
+          <DCArtboard id="inv-d" label="Dark" width={1280} height={820}><ScreenInventory theme={D} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="inbound" title="Inbound" subtitle="Receipts list and receiving detail with a friendly 'heads up' from Cubby.">
+          <DCArtboard id="inb-list" label="List · Light" width={1280} height={760}><ScreenInboundList theme={L} /></DCArtboard>
+          <DCArtboard id="inb-det" label="Detail · Light" width={1280} height={820}><ScreenInboundDetail theme={L} /></DCArtboard>
+          <DCArtboard id="inb-det-d" label="Detail · Dark" width={1280} height={820}><ScreenInboundDetail theme={D} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="catalog" title="Catalog + Sites + Counts">
+          <DCArtboard id="prod-l" label="Products · Light" width={1280} height={760}><ScreenProducts theme={L} /></DCArtboard>
+          <DCArtboard id="wh-l" label="Warehouses · Light" width={1280} height={820}><ScreenWarehouses theme={L} /></DCArtboard>
+          <DCArtboard id="cc-l" label="Cycle counts · Light" width={1280} height={760}><ScreenCounts theme={L} /></DCArtboard>
+          <DCArtboard id="wh-d" label="Warehouses · Dark" width={1280} height={820}><ScreenWarehouses theme={D} /></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
