@@ -45,6 +45,7 @@ export default function HomePage() {
             <Ic.Spark size={10} /> warehouse that feels good
           </Tag>
           <h1
+            className="hero-title"
             style={{
               fontFamily: FONTS.display,
               fontSize: 64,

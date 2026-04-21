@@ -12,6 +12,18 @@ export const metadata = {
   description: "Warehouse Management System",
 };
 
+// Locks the viewport so a missed tap doesn't pinch-zoom the dashboard
+// into oblivion and so the page doesn't scroll horizontally on a
+// stray overflow. App router reads this from a dedicated `viewport`
+// export (separate from `metadata`).
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover" as const,
+};
+
 // Brand typography: Fraunces (display, italic-friendly), Geist (body),
 // JetBrains Mono (SKUs + numerics). Loaded via next/font so CSS is
 // inlined and no extra request hits Google at runtime.
