@@ -62,6 +62,21 @@ export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   clerkOrgId: text("clerk_org_id").unique(),
   name: text("name").notNull(),
+  // Company profile — surfaced on BOLs, QuickBooks exports, and the
+  // Settings → Company page. All nullable so existing rows aren't
+  // forced to backfill on upgrade.
+  legalName: text("legal_name"),
+  billingEmail: text("billing_email"),
+  phone: text("phone"),
+  taxId: text("tax_id"),
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  city: text("city"),
+  region: text("region"),
+  postalCode: text("postal_code"),
+  country: text("country"),
+  timezone: text("timezone").default("UTC").notNull(),
+  logoUrl: text("logo_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

@@ -21,6 +21,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Home", icon: Ic.Home },
+  { href: "/tasks", label: "My tasks", icon: Ic.Check },
   { href: "/reports", label: "Overview", icon: Ic.Chart },
   { href: "/inbound", label: "Inbound", icon: Ic.Inbound },
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
@@ -28,7 +29,7 @@ const NAV: NavItem[] = [
   { href: "/products", label: "Products", icon: Ic.Boxes },
   { href: "/warehouses", label: "Warehouses", icon: Ic.Warehouse },
   { href: "/inventory/counts", label: "Cycle counts", icon: Ic.Clipboard },
-  { href: "/settings/integrations", label: "Settings", icon: Ic.Settings },
+  { href: "/settings", label: "Settings", icon: Ic.Settings },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {

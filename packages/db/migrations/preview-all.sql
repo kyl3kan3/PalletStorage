@@ -25,9 +25,34 @@ CREATE TABLE IF NOT EXISTS "organizations" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "clerk_org_id" text,
   "name" text NOT NULL,
+  "legal_name" text,
+  "billing_email" text,
+  "phone" text,
+  "tax_id" text,
+  "address_line1" text,
+  "address_line2" text,
+  "city" text,
+  "region" text,
+  "postal_code" text,
+  "country" text,
+  "timezone" text NOT NULL DEFAULT 'UTC',
+  "logo_url" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "organizations_clerk_org_id_unique" UNIQUE("clerk_org_id")
 );
+-- If the table already existed before these columns were added, patch it:
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "legal_name" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "billing_email" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "phone" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "tax_id" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "address_line1" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "address_line2" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "city" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "region" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "postal_code" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "country" text;
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "timezone" text NOT NULL DEFAULT 'UTC';
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "logo_url" text;
 
 CREATE TABLE IF NOT EXISTS "users" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

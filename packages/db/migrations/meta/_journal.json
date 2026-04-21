@@ -50,6 +50,13 @@
       "when": 1776703319873,
       "tag": "0006_qb_webhook_events",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776703319874,
+      "tag": "0007_company_profile",
+      "breakpoints": true
     }
   ]
 }
