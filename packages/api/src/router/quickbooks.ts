@@ -87,6 +87,75 @@ export const quickbooksRouter = router({
     }),
 
   /**
+   * Push a closed cycle count's variances as QB Item QtyOnHand updates.
+   * Looks up the cycle_count movements by refId so the caller only
+   * needs the count id (not the underlying movement ids).
+   */
+  exportCycleCount: tenantProcedure
+    .input(z.object({ cycleCountId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const conn = await requireConnection(ctx, orgId);
+
+      // Confirm the count is closed and belongs to this org.
+      const [cc] = await ctx.db
+        .select()
+        .from(schema.cycleCounts)
+        .where(
+          and(
+            eq(schema.cycleCounts.id, input.cycleCountId),
+            eq(schema.cycleCounts.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!cc) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Cycle count not found" });
+      }
+      if (cc.status !== "closed") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Cycle count must be approved (closed) first; current status '${cc.status}'`,
+        });
+      }
+
+      const movements = await ctx.db
+        .select({ id: schema.movements.id })
+        .from(schema.movements)
+        .where(
+          and(
+            eq(schema.movements.organizationId, orgId),
+            eq(schema.movements.reason, "cycle_count"),
+            eq(schema.movements.refType, "cycle_count"),
+            eq(schema.movements.refId, input.cycleCountId),
+          ),
+        );
+      if (movements.length === 0) {
+        return {
+          qboId: "no_variance",
+          movements: 0,
+          note: "Count was approved with zero variance — nothing to push.",
+        };
+      }
+
+      const result = await exportAdjustmentAsInventoryAdjustment(
+        ctx.db,
+        conn,
+        orgId,
+        movements.map((m) => m.id),
+      );
+
+      await ctx.db.insert(schema.quickbooksExports).values({
+        organizationId: orgId,
+        sourceType: "cycle_count",
+        sourceId: input.cycleCountId,
+        qboEntityType: "InventoryAdjustment",
+        qboEntityId: result.qboId,
+      });
+
+      return result;
+    }),
+
+  /**
    * Orders that are in a QBO-exportable state (closed inbounds, shipped
    * outbounds) and haven't been successfully exported yet. Powers the
    * "Ready to export" queue on /settings/integrations.
@@ -112,6 +181,9 @@ export const quickbooksRouter = router({
     );
     const exportedOutbound = new Set(
       exported.filter((e) => e.sourceType === "outbound_order").map((e) => e.sourceId),
+    );
+    const exportedCounts = new Set(
+      exported.filter((e) => e.sourceType === "cycle_count").map((e) => e.sourceId),
     );
 
     const closedInbound = await ctx.db
@@ -148,9 +220,26 @@ export const quickbooksRouter = router({
       .orderBy(desc(schema.outboundOrders.shippedAt))
       .limit(50);
 
+    const closedCounts = await ctx.db
+      .select({
+        id: schema.cycleCounts.id,
+        approvedAt: schema.cycleCounts.approvedAt,
+        locationId: schema.cycleCounts.locationId,
+      })
+      .from(schema.cycleCounts)
+      .where(
+        and(
+          eq(schema.cycleCounts.organizationId, orgId),
+          eq(schema.cycleCounts.status, "closed"),
+        ),
+      )
+      .orderBy(desc(schema.cycleCounts.approvedAt))
+      .limit(50);
+
     return {
       inbound: closedInbound.filter((o) => !exportedInbound.has(o.id)),
       outbound: shippedOutbound.filter((o) => !exportedOutbound.has(o.id)),
+      cycleCounts: closedCounts.filter((c) => !exportedCounts.has(c.id)),
     };
   }),
 

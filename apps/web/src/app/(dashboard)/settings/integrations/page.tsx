@@ -29,6 +29,9 @@ export default function IntegrationsPage() {
   const exportOutbound = trpc.quickbooks.exportOutbound.useMutation({
     onSuccess: refetchReady,
   });
+  const exportCycleCount = trpc.quickbooks.exportCycleCount.useMutation({
+    onSuccess: refetchReady,
+  });
 
   // The authorize route derives the redirect_uri from the current origin
   // (so no env var to misconfigure) and sets a CSRF nonce cookie before
@@ -209,6 +212,74 @@ export default function IntegrationsPage() {
                   {exportOutbound.isPending && exportOutbound.variables?.outboundOrderId === o.id
                     ? "Exporting…"
                     : "Export as Invoice"}
+                </Btn>
+              </div>
+            ))}
+          </Card>
+
+          <div style={{ height: 12 }} />
+
+          <Card t={t} padding={0}>
+            <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <SquircleIcon t={t} icon={Ic.Clipboard} tint="sky" size={32} />
+              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>
+                Approved cycle counts · Inventory adjustments
+              </div>
+              <Tag t={t} tone="neutral">
+                {ready.data?.cycleCounts.length ?? 0}
+              </Tag>
+            </div>
+            {(ready.data?.cycleCounts ?? []).length === 0 && (
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  color: t.muted,
+                  fontSize: 13,
+                }}
+              >
+                No approved counts waiting. Close a cycle count to queue a QBO
+                inventory adjustment (only counts with variance push any change).
+              </div>
+            )}
+            {ready.data?.cycleCounts.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  padding: "12px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: t.ink,
+                      fontWeight: 600,
+                      fontFamily: FONTS.mono,
+                      fontSize: 13,
+                    }}
+                  >
+                    {c.id.slice(0, 8)}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted }}>
+                    {c.approvedAt ? `approved ${c.approvedAt.toLocaleDateString()}` : "approved"}
+                  </div>
+                </div>
+                <Btn
+                  t={t}
+                  variant="primary"
+                  size="sm"
+                  icon={Ic.Download}
+                  disabled={exportCycleCount.isPending}
+                  onClick={() => exportCycleCount.mutate({ cycleCountId: c.id })}
+                >
+                  {exportCycleCount.isPending &&
+                  exportCycleCount.variables?.cycleCountId === c.id
+                    ? "Exporting…"
+                    : "Push QtyOnHand"}
                 </Btn>
               </div>
             ))}

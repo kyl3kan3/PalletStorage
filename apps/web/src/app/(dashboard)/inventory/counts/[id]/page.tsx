@@ -31,6 +31,8 @@ export default function CycleCountDetailPage({
       utils.cycleCount.listOpen.invalidate();
     },
   });
+  const qbStatus = trpc.quickbooks.status.useQuery();
+  const exportCycleCount = trpc.quickbooks.exportCycleCount.useMutation();
 
   const [counted, setCounted] = useState<Record<string, string>>({});
 
@@ -39,6 +41,7 @@ export default function CycleCountDetailPage({
   const status = cc?.status ?? "…";
   const isCountingPhase = status === "open" || status === "counting";
   const isReviewing = status === "reviewing";
+  const isClosed = status === "closed";
 
   return (
     <div>
@@ -213,6 +216,47 @@ export default function CycleCountDetailPage({
                 {approve.error.message}
               </div>
             )}
+          </Card>
+        </div>
+      )}
+
+      {isClosed && (
+        <div style={{ marginTop: 16 }}>
+          <Card t={t}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <Btn
+                t={t}
+                variant="secondary"
+                size="md"
+                icon={Ic.Download}
+                disabled={!qbStatus.data?.connected || exportCycleCount.isPending}
+                onClick={() => exportCycleCount.mutate({ cycleCountId: id })}
+              >
+                {exportCycleCount.isPending ? "Exporting…" : "Push QtyOnHand to QuickBooks"}
+              </Btn>
+              {exportCycleCount.data && (
+                <Tag
+                  t={t}
+                  tone={exportCycleCount.data.qboId === "no_variance" ? "neutral" : "mint"}
+                >
+                  {exportCycleCount.data.qboId === "no_variance"
+                    ? "No variance to push"
+                    : `Updated ${exportCycleCount.data.movements} item(s)`}
+                </Tag>
+              )}
+              {exportCycleCount.error && (
+                <span style={{ fontSize: 12, color: t.coral }}>
+                  {exportCycleCount.error.message}
+                </span>
+              )}
+            </div>
           </Card>
         </div>
       )}
