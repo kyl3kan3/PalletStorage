@@ -4,7 +4,7 @@ import { OrganizationProfile } from "@clerk/nextjs";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, Tag, type TagTone } from "~/components/kit";
-import { SettingsNav } from "~/components/settings-nav";
+import { BackLink } from "~/components/back-link";
 
 /**
  * Team page. Clerk's <OrganizationProfile /> handles invites and role
@@ -19,7 +19,7 @@ export default function TeamPage() {
 
   return (
     <div>
-      <SettingsNav />
+      <BackLink href="/settings" label="Back to settings" />
       <PageTitle
         eyebrow="People"
         title="Team & permissions"

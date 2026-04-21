@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { theme } from "~/lib/theme";
 import { Card, PageTitle, SquircleIcon } from "~/components/kit";
 import { Ic } from "~/components/icons";
-import { SettingsNav } from "~/components/settings-nav";
 
 /**
  * Settings landing page — entry points to each area. Each tile links to
@@ -17,7 +16,6 @@ export default function SettingsPage() {
   const t = theme;
   return (
     <div>
-      <SettingsNav />
       <PageTitle
         eyebrow="Configure"
         title="Settings"

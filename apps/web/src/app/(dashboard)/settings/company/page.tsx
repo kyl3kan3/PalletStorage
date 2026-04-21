@@ -5,7 +5,7 @@ import { trpc } from "~/lib/trpc";
 import { theme } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
-import { SettingsNav } from "~/components/settings-nav";
+import { BackLink } from "~/components/back-link";
 
 interface Form {
   name: string;
@@ -96,7 +96,7 @@ export default function CompanyPage() {
 
   return (
     <div>
-      <SettingsNav />
+      <BackLink href="/settings" label="Back to settings" />
       <PageTitle
         eyebrow="Company profile"
         title={form.name || "Your company"}
