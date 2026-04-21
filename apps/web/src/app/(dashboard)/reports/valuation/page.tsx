@@ -75,7 +75,7 @@ export default function ValuationReportPage() {
         }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
         <StatBig t={t} label="Total value" value={`$${(totalCents / 100).toFixed(2)}`} tint="primary" />
         <StatBig t={t} label="Units on hand" value={totalQty.toLocaleString()} />
         <StatBig t={t} label="SKUs priced" value={`${pricedSkus} / ${rows.length}`} tint="mint" />

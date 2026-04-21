@@ -46,7 +46,7 @@ export default function NewInboundPage() {
             create.mutate({ warehouseId, reference, supplier: supplier || undefined, lines });
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
             <Field label="Warehouse">
               <Select
                 value={warehouseId}

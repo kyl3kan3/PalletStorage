@@ -34,6 +34,7 @@ export default function ReportsPage() {
       />
 
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -47,7 +48,7 @@ export default function ReportsPage() {
         <StatBig t={t} label="Moves · 24h" value={summary.data?.movements24h ?? "—"} tint="mint" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 20 }}>
+      <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 20 }}>
         <Card t={t} padding={22}>
           <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 16 }}>
             <div style={{ flex: 1 }}>
@@ -133,7 +134,7 @@ export default function ReportsPage() {
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 16 }}>
+      <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 16 }}>
         <Card t={t} padding={0}>
           <div style={{ padding: "16px 22px 10px" }}>
             <SectionEyebrow t={t}>Top stock</SectionEyebrow>

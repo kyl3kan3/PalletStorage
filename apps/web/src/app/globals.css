@@ -10,3 +10,58 @@ body {
   font-family: var(--font-geist), -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
 }
+
+/*
+ * Mobile niceties. Most of the dashboard uses inline styles, so the
+ * narrow-screen fixes live here rather than fighting them into each
+ * component. Breakpoint mirrors useMatchMedia("(max-width: 1023px)").
+ */
+@media (max-width: 1023px) {
+  /* Table-shaped Cards (padding=0 from kit.tsx) scroll horizontally
+   * and force their inner grid rows to hold a minimum width so
+   * columns don't crush. Regular Cards don't need this. */
+  [data-card][data-card-flush] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-card][data-card-flush] > div[style*="grid-template-columns"],
+  [data-card][data-card-flush] > a[style*="grid-template-columns"] {
+    min-width: 720px;
+  }
+
+  /* PageTitle's right-side action cluster drops below the title on
+   * narrow screens instead of pushing the title off the page. */
+  [data-page-title] > div:first-child {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  [data-page-title] > div:first-child > div:last-child {
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* Generic 3-4 column grids (KPI strips, tile rows) collapse to two
+   * columns on narrow phones. Callers can opt out with
+   * `data-no-collapse`. */
+  [data-collapse-grid]:not([data-no-collapse]) {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Very small phones — collapse all grids to a single column. */
+  [data-collapse-grid]:not([data-no-collapse]) {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Hide the Clerk org switcher label on tiny screens to save space. */
+  .cl-organizationSwitcherTrigger .cl-organizationPreviewMainIdentifier {
+    display: none;
+  }
+}
+
+/* Every <table> / card-wrapped grid should never force overflow on
+ * the body; keep horizontal scroll local. */
+body {
+  overflow-x: hidden;
+}

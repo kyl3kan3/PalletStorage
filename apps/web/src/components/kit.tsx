@@ -128,6 +128,12 @@ export function Card({
   return (
     <div
       onClick={onClick}
+      // data-card lets responsive CSS target every Card — padding=0
+      // cards (our table wrappers) become horizontally scrollable on
+      // mobile and their inner fr-grids pick up a min-width so columns
+      // don't crush. See apps/web/src/app/globals.css.
+      data-card=""
+      data-card-flush={padding === 0 ? "" : undefined}
       style={{
         background: bg,
         borderRadius: radius,
@@ -495,7 +501,7 @@ export function PageTitle({
   right?: ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: 18 }}>
+    <div style={{ marginBottom: 18 }} data-page-title>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
         <div style={{ flex: 1 }}>
           {eyebrow && (

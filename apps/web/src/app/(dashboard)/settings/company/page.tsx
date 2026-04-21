@@ -275,7 +275,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>{children}</div>;
+  return (
+    <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      {children}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

@@ -116,7 +116,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
       </Card>
 
       {!isTerminal && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+        <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
           <Card t={t}>
             <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Close order</div>
             {hasShort && (
