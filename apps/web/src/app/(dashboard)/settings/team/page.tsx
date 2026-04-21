@@ -27,11 +27,14 @@ export default function TeamPage() {
       <div style={{ marginBottom: 24 }}>
         <Card t={t} padding={0}>
           {/* Clerk's own UI — renders invite form, pending invites, and
-              role editor. We remove its outer card chrome by zeroing the
-              Card padding and letting Clerk draw its own border. */}
+              role editor. Hash routing keeps Clerk's internal sub-pages
+              (members / invitations) on the same URL so navigating into
+              them doesn't dump you out of the WMS layout. */}
           <OrganizationProfile
             routing="hash"
-            appearance={{ elements: { rootBox: "w-full", cardBox: "shadow-none border-0" } }}
+            appearance={{
+              elements: { rootBox: "w-full", cardBox: "shadow-none border-0 w-full" },
+            }}
           />
         </Card>
       </div>

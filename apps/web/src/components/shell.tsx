@@ -174,10 +174,18 @@ export function Shell({ children }: { children: ReactNode }) {
           <div style={{ flex: 1 }} />
           <OrganizationSwitcher
             hidePersonal
+            afterSelectOrganizationUrl="/"
+            organizationProfileMode="navigation"
+            organizationProfileUrl="/settings/team"
+            createOrganizationMode="modal"
             appearance={{ elements: { rootBox: "flex" } }}
           />
           <SignedIn>
-            <UserButton />
+            <UserButton
+              userProfileMode="navigation"
+              userProfileUrl="/account"
+              afterSignOutUrl="/"
+            />
           </SignedIn>
         </header>
 
