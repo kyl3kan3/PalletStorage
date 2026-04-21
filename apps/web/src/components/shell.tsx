@@ -24,7 +24,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "Home", icon: Ic.Home },
   { href: "/tasks", label: "My tasks", icon: Ic.Check },
-  { href: "/reports", label: "Overview", icon: Ic.Chart },
+  { href: "/reports", label: "Reports", icon: Ic.Chart },
   { href: "/inbound", label: "Inbound", icon: Ic.Inbound },
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
   { href: "/inventory", label: "Inventory", icon: Ic.Scan },

@@ -3,7 +3,7 @@
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, StatBig, Tag } from "~/components/kit";
-import { ReportsNav } from "~/components/reports-nav";
+import { BackLink } from "~/components/back-link";
 import { ReportExports } from "~/components/report-exports";
 
 export default function ValuationReportPage() {
@@ -17,7 +17,7 @@ export default function ValuationReportPage() {
 
   return (
     <div>
-      <ReportsNav />
+      <BackLink href="/reports" label="Back to reports" />
       <PageTitle
         eyebrow="Finance"
         title="Inventory valuation"

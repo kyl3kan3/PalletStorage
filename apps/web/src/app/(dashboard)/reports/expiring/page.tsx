@@ -4,7 +4,7 @@ import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, Tag } from "~/components/kit";
-import { ReportsNav } from "~/components/reports-nav";
+import { BackLink } from "~/components/back-link";
 import { ReportExports } from "~/components/report-exports";
 
 export default function ExpiringReportPage() {
@@ -17,7 +17,7 @@ export default function ExpiringReportPage() {
 
   return (
     <div>
-      <ReportsNav />
+      <BackLink href="/reports" label="Back to reports" />
       <PageTitle
         eyebrow="At risk"
         title="Expiring stock"

@@ -8,7 +8,7 @@ import { trpc } from "~/lib/trpc";
 type MovementRow = inferRouterOutputs<AppRouter>["report"]["movementLog"][number];
 import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, Tag } from "~/components/kit";
-import { ReportsNav } from "~/components/reports-nav";
+import { BackLink } from "~/components/back-link";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
 import { ReportExports } from "~/components/report-exports";
 import { movementReasonTone } from "~/lib/statusTone";
@@ -48,7 +48,7 @@ export default function MovementsReportPage() {
 
   return (
     <div>
-      <ReportsNav />
+      <BackLink href="/reports" label="Back to reports" />
       <PageTitle
         eyebrow="Audit"
         title="Movement log"

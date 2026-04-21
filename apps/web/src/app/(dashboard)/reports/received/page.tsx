@@ -4,7 +4,7 @@ import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, Tag } from "~/components/kit";
-import { ReportsNav } from "~/components/reports-nav";
+import { BackLink } from "~/components/back-link";
 import { DateRangeControl, type DateRange } from "~/components/date-range";
 import { ReportExports } from "~/components/report-exports";
 
@@ -20,7 +20,7 @@ export default function ReceivedReportPage() {
 
   return (
     <div>
-      <ReportsNav />
+      <BackLink href="/reports" label="Back to reports" />
       <PageTitle
         eyebrow="Receiving"
         title="Received orders"
