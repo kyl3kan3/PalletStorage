@@ -1,0 +1,149 @@
+"use client";
+
+import { useState } from "react";
+import { trpc } from "~/lib/trpc";
+import { theme, FONTS } from "~/lib/theme";
+import { Btn, Card, PageTitle } from "~/components/kit";
+import { Ic } from "~/components/icons";
+import { ReportsNav } from "~/components/reports-nav";
+import { DateRangeControl, type DateRange } from "~/components/date-range";
+import { downloadCsv } from "~/lib/csv";
+
+export default function ProductivityReportPage() {
+  const t = theme;
+  const [range, setRange] = useState<DateRange>({
+    from: new Date(Date.now() - 30 * 24 * 3600 * 1000),
+    to: new Date(),
+  });
+  const q = trpc.report.operatorProductivity.useQuery(range);
+  const rows = q.data ?? [];
+  const maxTotal = Math.max(1, ...rows.map((r) => r.picks + r.counts));
+
+  return (
+    <div>
+      <ReportsNav />
+      <PageTitle
+        eyebrow="Team performance"
+        title="Operator productivity"
+        subtitle="Completed picks and approved cycle counts per user. Zero-activity users are hidden."
+        right={
+          <Btn
+            t={t}
+            variant="secondary"
+            size="sm"
+            icon={Ic.Download}
+            disabled={rows.length === 0}
+            onClick={() =>
+              downloadCsv(
+                `productivity-${new Date().toISOString().slice(0, 10)}.csv`,
+                rows,
+                [
+                  { key: "name", header: "Name" },
+                  { key: "email", header: "Email" },
+                  { key: "picks", header: "Picks" },
+                  { key: "counts", header: "Cycle counts" },
+                  {
+                    key: "picks",
+                    header: "Total",
+                    format: (_, row) => String(row.picks + row.counts),
+                  },
+                ],
+              )
+            }
+          >
+            Download CSV
+          </Btn>
+        }
+      />
+
+      <Card t={t}>
+        <DateRangeControl value={range} onChange={setRange} />
+      </Card>
+
+      <div style={{ height: 16 }} />
+
+      <Card t={t} padding={0}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.2fr 1.6fr 100px 140px 1fr",
+            gap: 14,
+            padding: "14px 20px",
+            fontSize: 11,
+            color: t.muted,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            fontWeight: 600,
+          }}
+        >
+          <div>Name</div>
+          <div>Email</div>
+          <div style={{ textAlign: "right" }}>Picks</div>
+          <div style={{ textAlign: "right" }}>Cycle counts</div>
+          <div>Share</div>
+        </div>
+        {rows.length === 0 && (
+          <div
+            style={{
+              padding: "28px 20px",
+              color: t.muted,
+              fontSize: 13,
+              borderTop: `1.5px dashed ${t.border}`,
+              textAlign: "center",
+            }}
+          >
+            No completed work in this window.
+          </div>
+        )}
+        {rows.map((r) => {
+          const total = r.picks + r.counts;
+          return (
+            <div
+              key={r.user_id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.2fr 1.6fr 100px 140px 1fr",
+                gap: 14,
+                padding: "12px 20px",
+                alignItems: "center",
+                borderTop: `1.5px dashed ${t.border}`,
+                fontSize: 13.5,
+              }}
+            >
+              <span style={{ color: t.ink, fontWeight: 600 }}>{r.name ?? "—"}</span>
+              <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.muted }}>
+                {r.email}
+              </span>
+              <span style={{ textAlign: "right", fontFamily: FONTS.mono, color: t.ink }}>
+                {r.picks}
+              </span>
+              <span style={{ textAlign: "right", fontFamily: FONTS.mono, color: t.ink }}>
+                {r.counts}
+              </span>
+              <span>
+                <div
+                  style={{
+                    position: "relative",
+                    height: 10,
+                    background: t.surfaceAlt,
+                    borderRadius: 6,
+                    overflow: "hidden",
+                    border: `1px solid ${t.border}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${(total / maxTotal) * 100}%`,
+                      height: "100%",
+                      background: t.primary,
+                    }}
+                  />
+                </div>
+              </span>
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+}

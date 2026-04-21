@@ -6,6 +6,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Ring, StatBig, Tabs, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { formatDuration, movementReasonTone } from "~/lib/statusTone";
+import { ReportsNav } from "~/components/reports-nav";
 
 export default function ReportsPage() {
   const t = theme;
@@ -25,20 +26,11 @@ export default function ReportsPage() {
 
   return (
     <div>
+      <ReportsNav />
       <PageTitle
         eyebrow="How the floor is doing"
         title="Overview"
         subtitle="Numbers for this week, rolled up and easy to scan."
-        right={
-          <>
-            <Btn t={t} variant="secondary" size="sm" icon={Ic.Calendar}>
-              Last 30 days
-            </Btn>
-            <Btn t={t} variant="secondary" size="sm" icon={Ic.Download}>
-              Export
-            </Btn>
-          </>
-        }
       />
 
       <div

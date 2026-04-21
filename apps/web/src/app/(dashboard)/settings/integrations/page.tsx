@@ -8,12 +8,27 @@ import { SettingsNav } from "~/components/settings-nav";
 
 export default function IntegrationsPage() {
   const t = theme;
+  const utils = trpc.useUtils();
   const status = trpc.quickbooks.status.useQuery();
   const disconnect = trpc.quickbooks.disconnect.useMutation({
     onSuccess: () => status.refetch(),
   });
   const history = trpc.quickbooks.history.useQuery({ limit: 50 });
   const webhooks = trpc.quickbooks.webhookHistory.useQuery({ limit: 30 });
+  const ready = trpc.quickbooks.readyToExport.useQuery(undefined, {
+    enabled: !!status.data?.connected,
+  });
+
+  const refetchReady = () => {
+    utils.quickbooks.readyToExport.invalidate();
+    utils.quickbooks.history.invalidate();
+  };
+  const exportInbound = trpc.quickbooks.exportInbound.useMutation({
+    onSuccess: refetchReady,
+  });
+  const exportOutbound = trpc.quickbooks.exportOutbound.useMutation({
+    onSuccess: refetchReady,
+  });
 
   // The authorize route derives the redirect_uri from the current origin
   // (so no env var to misconfigure) and sets a CSRF nonce cookie before
@@ -69,6 +84,137 @@ export default function IntegrationsPage() {
           )}
         </div>
       </Card>
+
+      {connected && (
+        <div style={{ marginTop: 24 }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: t.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              fontWeight: 600,
+              marginBottom: 8,
+            }}
+          >
+            Ready to export
+          </div>
+
+          <Card t={t} padding={0}>
+            <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <SquircleIcon t={t} icon={Ic.Inbound} tint="primary" size={32} />
+              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Closed inbounds · Bills</div>
+              <Tag t={t} tone="neutral">
+                {ready.data?.inbound.length ?? 0}
+              </Tag>
+            </div>
+            {(ready.data?.inbound ?? []).length === 0 && (
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  color: t.muted,
+                  fontSize: 13,
+                }}
+              >
+                No closed inbounds waiting. Close an inbound on its detail page to queue a Bill.
+              </div>
+            )}
+            {ready.data?.inbound.map((o) => (
+              <div
+                key={o.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  padding: "12px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: t.ink, fontWeight: 600, fontFamily: FONTS.mono, fontSize: 13 }}>
+                    {o.reference}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted }}>
+                    {o.supplier ?? "no supplier"}
+                    {o.closedAt ? ` · closed ${o.closedAt.toLocaleDateString()}` : ""}
+                  </div>
+                </div>
+                <Btn
+                  t={t}
+                  variant="primary"
+                  size="sm"
+                  icon={Ic.Download}
+                  disabled={exportInbound.isPending}
+                  onClick={() => exportInbound.mutate({ inboundOrderId: o.id })}
+                >
+                  {exportInbound.isPending && exportInbound.variables?.inboundOrderId === o.id
+                    ? "Exporting…"
+                    : "Export as Bill"}
+                </Btn>
+              </div>
+            ))}
+          </Card>
+
+          <div style={{ height: 12 }} />
+
+          <Card t={t} padding={0}>
+            <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <SquircleIcon t={t} icon={Ic.Outbound} tint="coral" size={32} />
+              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Shipped outbounds · Invoices</div>
+              <Tag t={t} tone="neutral">
+                {ready.data?.outbound.length ?? 0}
+              </Tag>
+            </div>
+            {(ready.data?.outbound ?? []).length === 0 && (
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  color: t.muted,
+                  fontSize: 13,
+                }}
+              >
+                No shipped outbounds waiting. Ship an outbound to queue an Invoice.
+              </div>
+            )}
+            {ready.data?.outbound.map((o) => (
+              <div
+                key={o.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  padding: "12px 20px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: t.ink, fontWeight: 600, fontFamily: FONTS.mono, fontSize: 13 }}>
+                    {o.reference}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted }}>
+                    {o.customer ?? "no customer"}
+                    {o.shippedAt ? ` · shipped ${o.shippedAt.toLocaleDateString()}` : ""}
+                  </div>
+                </div>
+                <Btn
+                  t={t}
+                  variant="primary"
+                  size="sm"
+                  icon={Ic.Download}
+                  disabled={exportOutbound.isPending}
+                  onClick={() => exportOutbound.mutate({ outboundOrderId: o.id })}
+                >
+                  {exportOutbound.isPending && exportOutbound.variables?.outboundOrderId === o.id
+                    ? "Exporting…"
+                    : "Export as Invoice"}
+                </Btn>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
 
       <div style={{ marginTop: 24 }}>
         <div

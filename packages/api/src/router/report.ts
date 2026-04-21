@@ -1,8 +1,29 @@
 import { z } from "zod";
-import { and, asc, count, countDistinct, eq, gte, isNotNull, lte, sql, sum } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  lte,
+  sql,
+  sum,
+} from "drizzle-orm";
 import { schema } from "@wms/db";
 import { router, tenantProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+
+// Shared zod input for date-range reports. Both sides optional so a
+// caller can omit one and get "everything before X" / "everything after X".
+const dateRangeShape = {
+  from: z.date().optional(),
+  to: z.date().optional(),
+} as const;
+const dateRange = z.object(dateRangeShape).default({});
 
 /**
  * Aggregations for the Reports dashboard. Each procedure returns data ready
@@ -177,4 +198,213 @@ export const reportRouter = router({
       movements24h: moves24h?.n ?? 0,
     };
   }),
+
+  /**
+   * Shipped outbound orders within the date range. Per-order row with
+   * line totals and the QBO invoice id if one was created. Used by
+   * /reports/shipped and its CSV export.
+   */
+  shippedOrders: tenantProcedure
+    .input(dateRange)
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const rows = await ctx.db
+        .select({
+          id: schema.outboundOrders.id,
+          reference: schema.outboundOrders.reference,
+          customer: schema.outboundOrders.customer,
+          shippedAt: schema.outboundOrders.shippedAt,
+          lineCount: sql<number>`count(${schema.outboundLines.id})::int`,
+          qtyPicked: sql<number>`coalesce(sum(${schema.outboundLines.qtyPicked}),0)::int`,
+          totalCents: sql<number>`coalesce(sum(${schema.outboundLines.qtyPicked} * coalesce(${schema.products.unitPriceCents},0)),0)::bigint`,
+        })
+        .from(schema.outboundOrders)
+        .leftJoin(
+          schema.outboundLines,
+          eq(schema.outboundLines.outboundOrderId, schema.outboundOrders.id),
+        )
+        .leftJoin(schema.products, eq(schema.products.id, schema.outboundLines.productId))
+        .where(
+          and(
+            eq(schema.outboundOrders.organizationId, orgId),
+            eq(schema.outboundOrders.status, "shipped"),
+            input.from ? gte(schema.outboundOrders.shippedAt, input.from) : undefined,
+            input.to ? lte(schema.outboundOrders.shippedAt, input.to) : undefined,
+          ),
+        )
+        .groupBy(
+          schema.outboundOrders.id,
+          schema.outboundOrders.reference,
+          schema.outboundOrders.customer,
+          schema.outboundOrders.shippedAt,
+        )
+        .orderBy(desc(schema.outboundOrders.shippedAt));
+      return rows.map((r) => ({ ...r, totalCents: Number(r.totalCents) }));
+    }),
+
+  /** Closed inbound orders within the date range with qty received + variance. */
+  receivedOrders: tenantProcedure
+    .input(dateRange)
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db
+        .select({
+          id: schema.inboundOrders.id,
+          reference: schema.inboundOrders.reference,
+          supplier: schema.inboundOrders.supplier,
+          closedAt: schema.inboundOrders.closedAt,
+          closeReason: schema.inboundOrders.closeReason,
+          qtyExpected: sql<number>`coalesce(sum(${schema.inboundLines.qtyExpected}),0)::int`,
+          qtyReceived: sql<number>`coalesce(sum(${schema.inboundLines.qtyReceived}),0)::int`,
+        })
+        .from(schema.inboundOrders)
+        .leftJoin(
+          schema.inboundLines,
+          eq(schema.inboundLines.inboundOrderId, schema.inboundOrders.id),
+        )
+        .where(
+          and(
+            eq(schema.inboundOrders.organizationId, orgId),
+            eq(schema.inboundOrders.status, "closed"),
+            input.from ? gte(schema.inboundOrders.closedAt, input.from) : undefined,
+            input.to ? lte(schema.inboundOrders.closedAt, input.to) : undefined,
+          ),
+        )
+        .groupBy(
+          schema.inboundOrders.id,
+          schema.inboundOrders.reference,
+          schema.inboundOrders.supplier,
+          schema.inboundOrders.closedAt,
+          schema.inboundOrders.closeReason,
+        )
+        .orderBy(desc(schema.inboundOrders.closedAt));
+    }),
+
+  /**
+   * Operator productivity: completed picks + approved cycle counts per
+   * user in the date range. Useful for staffing reviews.
+   */
+  operatorProductivity: tenantProcedure
+    .input(dateRange)
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const from = input.from ?? new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const to = input.to ?? new Date();
+      const rows = await ctx.db.execute(sql`
+        with pick_counts as (
+          select p.assigned_user_id as user_id, count(*)::int as picks
+          from ${schema.picks} p
+          where p.organization_id = ${orgId}
+            and p.completed_at is not null
+            and p.completed_at between ${from} and ${to}
+          group by p.assigned_user_id
+        ),
+        cc_counts as (
+          select c.approved_by_user_id as user_id, count(*)::int as counts
+          from ${schema.cycleCounts} c
+          where c.organization_id = ${orgId}
+            and c.status = 'closed'
+            and c.approved_at between ${from} and ${to}
+          group by c.approved_by_user_id
+        )
+        select
+          u.id as user_id,
+          u.name,
+          u.email,
+          coalesce(p.picks, 0) as picks,
+          coalesce(c.counts, 0) as counts
+        from ${schema.users} u
+        left join pick_counts p on p.user_id = u.id
+        left join cc_counts c on c.user_id = u.id
+        where coalesce(p.picks, 0) + coalesce(c.counts, 0) > 0
+        order by (coalesce(p.picks,0) + coalesce(c.counts,0)) desc
+      `);
+      return rows as unknown as Array<{
+        user_id: string;
+        name: string | null;
+        email: string;
+        picks: number;
+        counts: number;
+      }>;
+    }),
+
+  /**
+   * Inventory valuation: on-hand qty × unit_price per SKU. Pallets must
+   * be in 'stored' state. Products without a price are reported at $0.
+   */
+  inventoryValuation: tenantProcedure.query(async ({ ctx }) => {
+    const orgId = await requireOrgId(ctx);
+    const rows = await ctx.db
+      .select({
+        productId: schema.products.id,
+        sku: schema.products.sku,
+        name: schema.products.name,
+        unitPriceCents: schema.products.unitPriceCents,
+        qty: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+      })
+      .from(schema.products)
+      .leftJoin(
+        schema.palletItems,
+        eq(schema.palletItems.productId, schema.products.id),
+      )
+      .leftJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+      .where(
+        and(
+          eq(schema.products.organizationId, orgId),
+          // pallet is either stored OR NULL (products with no stock at all still list)
+          sql`(${schema.pallets.status} is null or ${schema.pallets.status} = 'stored')`,
+        ),
+      )
+      .groupBy(
+        schema.products.id,
+        schema.products.sku,
+        schema.products.name,
+        schema.products.unitPriceCents,
+      )
+      .orderBy(desc(sql`coalesce(sum(${schema.palletItems.qty}),0)`));
+    return rows.map((r) => ({
+      ...r,
+      valueCents: (r.qty ?? 0) * (r.unitPriceCents ?? 0),
+    }));
+  }),
+
+  /** Full movement ledger, paginated. Filter by reason and/or date. */
+  movementLog: tenantProcedure
+    .input(
+      z.object({
+        ...dateRangeShape,
+        reasons: z
+          .array(
+            z.enum(["receive", "putaway", "move", "pick", "ship", "adjust", "cycle_count"]),
+          )
+          .optional(),
+        limit: z.number().int().min(1).max(500).default(200),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db
+        .select({
+          id: schema.movements.id,
+          palletId: schema.movements.palletId,
+          reason: schema.movements.reason,
+          fromLocationId: schema.movements.fromLocationId,
+          toLocationId: schema.movements.toLocationId,
+          notes: schema.movements.notes,
+          createdAt: schema.movements.createdAt,
+        })
+        .from(schema.movements)
+        .where(
+          and(
+            eq(schema.movements.organizationId, orgId),
+            input.from ? gte(schema.movements.createdAt, input.from) : undefined,
+            input.to ? lte(schema.movements.createdAt, input.to) : undefined,
+            input.reasons && input.reasons.length > 0
+              ? inArray(schema.movements.reason, input.reasons)
+              : undefined,
+          ),
+        )
+        .orderBy(desc(schema.movements.createdAt))
+        .limit(input.limit);
+    }),
 });

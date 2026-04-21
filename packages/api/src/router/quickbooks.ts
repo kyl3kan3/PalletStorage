@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema, type Db } from "@wms/db";
 import { router, tenantProcedure, adminProcedure } from "../trpc";
@@ -85,6 +85,74 @@ export const quickbooksRouter = router({
       const result = await exportAdjustmentAsInventoryAdjustment(ctx.db, conn, orgId, input.movementIds);
       return result;
     }),
+
+  /**
+   * Orders that are in a QBO-exportable state (closed inbounds, shipped
+   * outbounds) and haven't been successfully exported yet. Powers the
+   * "Ready to export" queue on /settings/integrations.
+   */
+  readyToExport: tenantProcedure.query(async ({ ctx }) => {
+    const orgId = await requireOrgId(ctx);
+
+    // Already-exported ids, to subtract from the candidates.
+    const exported = await ctx.db
+      .select({
+        sourceType: schema.quickbooksExports.sourceType,
+        sourceId: schema.quickbooksExports.sourceId,
+      })
+      .from(schema.quickbooksExports)
+      .where(
+        and(
+          eq(schema.quickbooksExports.organizationId, orgId),
+          eq(schema.quickbooksExports.status, "success"),
+        ),
+      );
+    const exportedInbound = new Set(
+      exported.filter((e) => e.sourceType === "inbound_order").map((e) => e.sourceId),
+    );
+    const exportedOutbound = new Set(
+      exported.filter((e) => e.sourceType === "outbound_order").map((e) => e.sourceId),
+    );
+
+    const closedInbound = await ctx.db
+      .select({
+        id: schema.inboundOrders.id,
+        reference: schema.inboundOrders.reference,
+        supplier: schema.inboundOrders.supplier,
+        closedAt: schema.inboundOrders.closedAt,
+      })
+      .from(schema.inboundOrders)
+      .where(
+        and(
+          eq(schema.inboundOrders.organizationId, orgId),
+          eq(schema.inboundOrders.status, "closed"),
+        ),
+      )
+      .orderBy(desc(schema.inboundOrders.closedAt))
+      .limit(50);
+
+    const shippedOutbound = await ctx.db
+      .select({
+        id: schema.outboundOrders.id,
+        reference: schema.outboundOrders.reference,
+        customer: schema.outboundOrders.customer,
+        shippedAt: schema.outboundOrders.shippedAt,
+      })
+      .from(schema.outboundOrders)
+      .where(
+        and(
+          eq(schema.outboundOrders.organizationId, orgId),
+          eq(schema.outboundOrders.status, "shipped"),
+        ),
+      )
+      .orderBy(desc(schema.outboundOrders.shippedAt))
+      .limit(50);
+
+    return {
+      inbound: closedInbound.filter((o) => !exportedInbound.has(o.id)),
+      outbound: shippedOutbound.filter((o) => !exportedOutbound.has(o.id)),
+    };
+  }),
 
   /** History of prior exports. */
   history: tenantProcedure
