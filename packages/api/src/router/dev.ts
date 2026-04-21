@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
-import { router, managerProcedure } from "../trpc";
+import { router, tenantProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 
 /**
@@ -23,9 +23,14 @@ export const devRouter = router({
    * Populate warehouses, locations, products, pallets, inbound +
    * outbound orders in a spread of statuses, movements, and cycle
    * counts for the signed-in user's org. Caller must be signed in as
-   * the TEST_ACCOUNT_EMAIL and be manager-or-admin.
+   * the TEST_ACCOUNT_EMAIL; the procedure is intentionally only
+   * tenant-scoped (not role-gated) because the email check is the
+   * real authorization boundary here. As a side effect, a successful
+   * seed also upgrades the caller's membership to 'admin' so every
+   * other role-gated action (close, ship, approve, etc.) works for
+   * the demo user.
    */
-  seed: managerProcedure
+  seed: tenantProcedure
     .input(
       z
         .object({
@@ -65,6 +70,25 @@ export const devRouter = router({
       }
 
       return ctx.db.transaction(async (tx) => {
+        // Bump the caller to admin in their own org so downstream
+        // role-gated actions (close, ship, approve) also work.
+        const [callerUser] = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.clerkUserId, ctx.userId))
+          .limit(1);
+        if (callerUser) {
+          await tx
+            .update(schema.memberships)
+            .set({ role: "admin" })
+            .where(
+              and(
+                eq(schema.memberships.organizationId, orgId),
+                eq(schema.memberships.userId, callerUser.id),
+              ),
+            );
+        }
+
         // ── Warehouses ────────────────────────────────────────────
         const [wh1] = await tx
           .insert(schema.warehouses)
