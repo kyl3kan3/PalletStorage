@@ -8,6 +8,7 @@ import { Ic } from "~/components/icons";
 import { inboundStatusTone } from "~/lib/statusTone";
 import { friendlyInboundStatus, nextInboundStep } from "~/lib/friendly";
 import { NextStepCard } from "~/components/next-step-card";
+import { useIsManager } from "~/lib/useRole";
 
 export default function InboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -102,7 +103,10 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
   const status = order?.status ?? "…";
   const isTerminal = status === "closed" || status === "cancelled";
-  const canEdit = !isTerminal;
+  const isManager = useIsManager();
+  // Operators can see everything but can't edit header / cancel / add
+  // or remove lines. Manager+ gets the full toolbox.
+  const canEdit = !isTerminal && isManager;
 
   const productName = (productId: string) => {
     const p = products.data?.find((x) => x.id === productId);
@@ -459,7 +463,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         </Card>
       </div>
 
-      {!isTerminal && !editing && (
+      {!isTerminal && !editing && isManager && (
         <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
           <Card t={t}>
             <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Close order</div>

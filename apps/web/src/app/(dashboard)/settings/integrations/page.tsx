@@ -5,9 +5,11 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, SquircleIcon, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { BackLink } from "~/components/back-link";
+import { useIsAdmin } from "~/lib/useRole";
 
 export default function IntegrationsPage() {
   const t = theme;
+  const isAdmin = useIsAdmin();
   const utils = trpc.useUtils();
   const status = trpc.quickbooks.status.useQuery();
   const disconnect = trpc.quickbooks.disconnect.useMutation({
@@ -69,7 +71,11 @@ export default function IntegrationsPage() {
                 : "Link a QBO realm to export bills and invoices from finished orders."}
             </div>
           </div>
-          {connected ? (
+          {/* Connect / Disconnect are admin-only — the server enforces
+              this too (adminProcedure on quickbooks.authorizeUrl +
+              .disconnect), but hiding the buttons keeps operators from
+              bumping into a confusing 403. */}
+          {isAdmin && (connected ? (
             <Btn
               t={t}
               variant="secondary"
@@ -84,7 +90,7 @@ export default function IntegrationsPage() {
             <Btn t={t} variant="accent" size="md" icon={Ic.Arrow} onClick={connect}>
               Connect
             </Btn>
-          )}
+          ))}
         </div>
       </Card>
 

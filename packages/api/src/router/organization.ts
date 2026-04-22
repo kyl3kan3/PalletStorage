@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
@@ -104,5 +104,60 @@ export const organizationRouter = router({
       .from(schema.memberships)
       .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
       .where(eq(schema.memberships.organizationId, orgId));
+  }),
+
+  /**
+   * Effective role of the signed-in user in the active org, as computed
+   * by the tRPC handler (prefers the memberships-table value over
+   * Clerk's reported role — see apps/web/src/app/api/trpc/[trpc]/route.ts).
+   * Returned as a plain string so the client can gate UI without
+   * reimplementing the Clerk↔DB reconciliation.
+   */
+  myRole: tenantProcedure.query(({ ctx }) => {
+    return { role: ctx.role ?? "operator" };
+  }),
+
+  /**
+   * Onboarding checklist. Shown on Home for freshly-provisioned orgs.
+   * Each step is boolean (done or not); the client renders a
+   * dismissible card when any of them are unchecked. Counts are
+   * cheap because every table is already indexed on organization_id.
+   */
+  onboarding: tenantProcedure.query(async ({ ctx }) => {
+    const orgId = await requireOrgId(ctx);
+    const one = async (
+      table:
+        | typeof schema.warehouses
+        | typeof schema.products
+        | typeof schema.customers
+        | typeof schema.suppliers
+        | typeof schema.inboundOrders
+        | typeof schema.outboundOrders,
+    ) => {
+      const [row] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(table)
+        .where(eq(table.organizationId, orgId));
+      return (row?.n ?? 0) > 0;
+    };
+    const [warehouse, product, customer, supplier, inbound, outbound] =
+      await Promise.all([
+        one(schema.warehouses),
+        one(schema.products),
+        one(schema.customers),
+        one(schema.suppliers),
+        one(schema.inboundOrders),
+        one(schema.outboundOrders),
+      ]);
+    return {
+      warehouse,
+      product,
+      customer,
+      supplier,
+      inbound,
+      outbound,
+      /** All "core" steps done. Catalog extras (customer/supplier) are optional. */
+      coreDone: warehouse && product && (inbound || outbound),
+    };
   }),
 });

@@ -6,6 +6,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, StatBig, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { BackLink } from "~/components/back-link";
+import { useIsManager } from "~/lib/useRole";
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -20,6 +21,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   });
 
   const c = q.data?.customer;
+  const isManager = useIsManager();
 
   return (
     <div>
@@ -30,16 +32,18 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         subtitle={c?.contactName ?? undefined}
         right={
           c?.active ? (
-            <Btn
-              t={t}
-              variant="secondary"
-              size="sm"
-              icon={Ic.X}
-              disabled={deactivate.isPending}
-              onClick={() => deactivate.mutate({ id })}
-            >
-              {deactivate.isPending ? "Deactivating…" : "Deactivate"}
-            </Btn>
+            isManager ? (
+              <Btn
+                t={t}
+                variant="secondary"
+                size="sm"
+                icon={Ic.X}
+                disabled={deactivate.isPending}
+                onClick={() => deactivate.mutate({ id })}
+              >
+                {deactivate.isPending ? "Deactivating…" : "Deactivate"}
+              </Btn>
+            ) : null
           ) : (
             <Tag t={t} tone="neutral">
               inactive

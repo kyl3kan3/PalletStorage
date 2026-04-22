@@ -8,6 +8,7 @@ import { Ic } from "~/components/icons";
 import { outboundStatusTone } from "~/lib/statusTone";
 import { friendlyOutboundStatus, nextOutboundStep } from "~/lib/friendly";
 import { NextStepCard } from "~/components/next-step-card";
+import { useIsManager } from "~/lib/useRole";
 
 export default function OutboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -41,7 +42,10 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
   const lines = detail.data?.lines ?? [];
   const status = order?.status ?? "…";
   const isTerminal = status === "shipped" || status === "cancelled";
-  const canCancel = status === "draft" || status === "open" || status === "picking";
+  const isManager = useIsManager();
+  // Cancelling an order is a manager+ action.
+  const canCancel =
+    isManager && (status === "draft" || status === "open" || status === "picking");
   const allLinesPicked =
     lines.length > 0 && lines.every((l) => l.qtyPicked >= l.qtyOrdered);
 

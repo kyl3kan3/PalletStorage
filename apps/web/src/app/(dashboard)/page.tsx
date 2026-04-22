@@ -8,6 +8,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Card, PageTitle, SquircleIcon, type IconTint } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { OverviewDashboard } from "~/components/overview-dashboard";
+import { OnboardingChecklist } from "~/components/onboarding-checklist";
 
 /**
  * Home — greeting + "Quick actions" shortcut bar + overview
@@ -35,6 +36,8 @@ export default function HomePage() {
         title={firstName ? `${greeting}, ${firstName}` : greeting}
         subtitle="What would you like to do today?"
       />
+
+      <OnboardingChecklist />
 
       <div
         data-collapse-grid
