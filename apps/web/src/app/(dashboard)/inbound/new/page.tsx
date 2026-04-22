@@ -207,7 +207,10 @@ export default function NewInboundPage() {
                       </option>
                     ))}
                   </Select>
-                  <HelpText>Who's shipping it to you. Set it once in Catalog → Suppliers.</HelpText>
+                  <HelpText>
+                    Who the truck is coming from (the source). Prints on the receipt
+                    as the shipper. Set up once in Catalog → Suppliers.
+                  </HelpText>
                 </Field>
                 <Field label="Customer (3PL client)">
                   <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
@@ -218,7 +221,11 @@ export default function NewInboundPage() {
                       </option>
                     ))}
                   </Select>
-                  <HelpText>Which of your clients owns these pallets. Leave blank for your own stock.</HelpText>
+                  <HelpText>
+                    Who <em>owns</em> the pallets once they land (the account you&apos;re
+                    storing for). Leave blank if it&apos;s your own stock — only needed
+                    if you&apos;re warehousing on behalf of a client.
+                  </HelpText>
                 </Field>
               </div>
 
