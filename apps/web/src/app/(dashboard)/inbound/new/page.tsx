@@ -7,6 +7,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { HelpText } from "~/components/address-fields";
+import { NewCustomerModal } from "~/components/new-customer-modal";
 
 interface Line {
   productId: string;
@@ -19,7 +20,6 @@ export default function NewInboundPage() {
   const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
-  const suppliers = trpc.supplier.search.useQuery({ q: "", limit: 100 });
   const customers = trpc.customer.search.useQuery({ q: "", limit: 100 });
   const create = trpc.inbound.create.useMutation({
     onSuccess: (order) => {
@@ -30,31 +30,26 @@ export default function NewInboundPage() {
 
   const [warehouseId, setWarehouseId] = useState<string>("");
   const [reference, setReference] = useState("");
-  const [supplier, setSupplier] = useState("");
-  const [supplierId, setSupplierId] = useState<string>("");
   const [customerId, setCustomerId] = useState<string>("");
   const [receivingLocationId, setReceivingLocationId] = useState<string>("");
   const [expectedAt, setExpectedAt] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
 
-  // Dock + staging locations in the selected warehouse — the candidates
-  // for receiving. Fetched only once a warehouse is picked.
   const locations = trpc.location.listByWarehouse.useQuery(
     { warehouseId },
     { enabled: warehouseId.length > 0 },
   );
   const receivingCandidates = useMemo(
     () =>
-      (locations.data ?? []).filter(
-        (l) => l.type === "dock" || l.type === "staging",
-      ),
+      (locations.data ?? []).filter((l) => l.type === "dock" || l.type === "staging"),
     [locations.data],
   );
 
   function addLine() {
     const firstProductId = products.data?.[0]?.id;
-    if (!firstProductId) return; // guarded by the banner below
+    if (!firstProductId) return;
     setLines((prev) => [...prev, { productId: firstProductId, qtyExpected: 1 }]);
   }
   function updateLine(i: number, patch: Partial<Line>) {
@@ -64,12 +59,10 @@ export default function NewInboundPage() {
     setLines(lines.filter((_, j) => j !== i));
   }
 
-  // Catches the silent-save failure: the server rejects lines with
-  // empty productId (fails UUID validation) and used to return a 400
-  // that the form didn't display.
   const invalidLines = lines.some((l) => !l.productId);
   const canSubmit =
     !create.isPending && !!warehouseId && !!reference.trim() && lines.length > 0 && !invalidLines;
+  const noProducts = (products.data?.length ?? 0) === 0;
 
   return (
     <div>
@@ -80,7 +73,7 @@ export default function NewInboundPage() {
       />
 
       <Card t={t}>
-        {(products.data?.length ?? 0) === 0 && (
+        {noProducts && (
           <div
             style={{
               background: t.coralSoft,
@@ -95,7 +88,7 @@ export default function NewInboundPage() {
             <a href="/products" style={{ color: t.primaryDeep, fontWeight: 600 }}>
               /products
             </a>{" "}
-            before creating an inbound — you can't save an order without at least one line.
+            before creating an inbound — you can&apos;t save an order without at least one item.
           </div>
         )}
 
@@ -107,8 +100,6 @@ export default function NewInboundPage() {
             create.mutate({
               warehouseId,
               reference,
-              supplier: supplier || undefined,
-              supplierId: supplierId || undefined,
               customerId: customerId || undefined,
               receivingLocationId: receivingLocationId || undefined,
               expectedAt: expectedAt ? new Date(expectedAt) : undefined,
@@ -116,8 +107,11 @@ export default function NewInboundPage() {
             });
           }}
         >
-          {/* Essentials — every inbound needs these. */}
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+          {/* Essentials. */}
+          <div
+            data-collapse-grid
+            style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}
+          >
             <Field label="Warehouse">
               <Select
                 value={warehouseId}
@@ -138,16 +132,13 @@ export default function NewInboundPage() {
                 t={t}
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                placeholder="PO or reference from the supplier"
+                placeholder="PO or reference from the sender"
                 required
               />
-              <HelpText>The PO number or any code your supplier put on the paperwork.</HelpText>
+              <HelpText>The PO number or any code on the paperwork.</HelpText>
             </Field>
           </div>
 
-          {/* Advanced — revealed behind a toggle so the first-time user
-              isn't staring at seven fields before they've picked a
-              warehouse. */}
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -165,12 +156,15 @@ export default function NewInboundPage() {
               gap: 6,
             }}
           >
-            {showAdvanced ? "▾" : "▸"} More details (supplier, customer, dock, date)
+            {showAdvanced ? "▾" : "▸"} More details (customer, dock, date)
           </button>
 
           {showAdvanced && (
             <>
-              <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div
+                data-collapse-grid
+                style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}
+              >
                 <Field label="Expected on">
                   <TextField
                     t={t}
@@ -193,27 +187,17 @@ export default function NewInboundPage() {
                       </option>
                     ))}
                   </Select>
-                  <HelpText>Which dock door or staging bin the shipment is headed to.</HelpText>
+                  <HelpText>Which dock door or staging bin it&apos;s headed to.</HelpText>
                 </Field>
               </div>
 
-              <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="Supplier">
-                  <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                    <option value="">— none —</option>
-                    {suppliers.data?.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <HelpText>
-                    Who the truck is coming from (the source). Prints on the receipt
-                    as the shipper. Set up once in Catalog → Suppliers.
-                  </HelpText>
-                </Field>
-                <Field label="Customer (3PL client)">
-                  <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+              <Field label="Customer (3PL client)">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Select
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
                     <option value="">— none —</option>
                     {customers.data?.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -221,108 +205,183 @@ export default function NewInboundPage() {
                       </option>
                     ))}
                   </Select>
-                  <HelpText>
-                    Who <em>owns</em> the pallets once they land (the account you&apos;re
-                    storing for). Leave blank if it&apos;s your own stock — only needed
-                    if you&apos;re warehousing on behalf of a client.
-                  </HelpText>
-                </Field>
-              </div>
-
-              <Field label="Supplier name (only if no supplier is linked above)">
-                <TextField
-                  t={t}
-                  value={supplier}
-                  onChange={(e) => setSupplier(e.target.value)}
-                  placeholder="Optional free-text label"
-                />
-                <HelpText>Shows on the printed receipt. Usually you'll pick a linked supplier instead.</HelpText>
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="secondary"
+                    size="md"
+                    icon={Ic.Plus}
+                    onClick={() => setNewCustomerOpen(true)}
+                  >
+                    New
+                  </Btn>
+                </div>
+                <HelpText>
+                  Who <em>owns</em> the pallets once they land. Leave blank if it&apos;s your own stock —
+                  only needed when warehousing on behalf of a client.
+                </HelpText>
               </Field>
             </>
           )}
 
+          {/* Items section — the big clickable empty state IS the "add
+              item" button, so there's no separate button above to
+              hunt for. With items, a smaller link appears at the
+              bottom of the list for adding another. */}
           <div>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Lines</div>
-              <Btn
-                t={t}
-                variant="secondary"
-                size="sm"
-                icon={Ic.Plus}
-                type="button"
-                onClick={addLine}
-                disabled={(products.data?.length ?? 0) === 0}
-              >
-                Add line
-              </Btn>
+            <div
+              style={{
+                fontSize: 11,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+                marginBottom: 10,
+              }}
+            >
+              Items on this shipment
             </div>
 
-            {lines.length === 0 && (
-              <div
+            {lines.length === 0 ? (
+              <button
+                type="button"
+                onClick={addLine}
+                disabled={noProducts}
                 style={{
-                  background: t.surfaceAlt,
-                  borderRadius: 12,
-                  padding: "16px",
-                  border: `1.5px dashed ${t.border}`,
-                  color: t.muted,
-                  fontSize: 13,
-                  textAlign: "center",
-                }}
-              >
-                No lines yet. Add at least one to save.
-              </div>
-            )}
-
-            {lines.map((l, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 120px 32px",
-                  gap: 10,
-                  padding: "10px 0",
-                  borderTop: i === 0 ? "none" : `1.5px dashed ${t.border}`,
+                  width: "100%",
+                  padding: "28px 16px",
+                  borderRadius: 14,
+                  background: noProducts ? t.surfaceAlt : t.primarySoft,
+                  border: `2px dashed ${noProducts ? t.border : t.primaryDeep}`,
+                  cursor: noProducts ? "not-allowed" : "pointer",
+                  color: noProducts ? t.muted : t.primaryDeep,
+                  fontFamily: FONTS.sans,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
+                  gap: 8,
                 }}
               >
-                <Select
-                  value={l.productId}
-                  onChange={(e) => updateLine(i, { productId: e.target.value })}
-                >
-                  {products.data?.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.sku ? `${p.sku} — ${p.name}` : p.name}
-                    </option>
-                  ))}
-                </Select>
-                <TextField
-                  t={t}
-                  type="number"
-                  min={1}
-                  value={l.qtyExpected}
-                  onChange={(e) =>
-                    updateLine(i, { qtyExpected: Number(e.target.value) })
-                  }
-                  style={{ width: 120 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeLine(i)}
-                  aria-label="Remove line"
+                <div
                   style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 8,
-                    background: "transparent",
-                    border: `1.5px solid ${t.border}`,
-                    color: t.muted,
-                    cursor: "pointer",
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    background: noProducts ? t.surface : t.primary,
+                    color: noProducts ? t.muted : t.primaryText,
+                    display: "grid",
+                    placeItems: "center",
+                    fontSize: 20,
+                    fontWeight: 700,
                   }}
                 >
-                  ×
+                  +
+                </div>
+                <div>Add an item to this shipment</div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
+                  {noProducts
+                    ? "Add a product to your catalog first"
+                    : "Click to pick a product and set the expected quantity"}
+                </div>
+              </button>
+            ) : (
+              <Card t={t} padding={0}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "40px 1fr 120px 36px",
+                    gap: 10,
+                    padding: "10px 16px",
+                    fontSize: 10.5,
+                    color: t.muted,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                    fontWeight: 600,
+                  }}
+                >
+                  <div>#</div>
+                  <div>Product</div>
+                  <div>Expected qty</div>
+                  <div />
+                </div>
+                {lines.map((l, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "40px 1fr 120px 36px",
+                      gap: 10,
+                      padding: "10px 16px",
+                      borderTop: `1.5px dashed ${t.border}`,
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                      {i + 1}
+                    </span>
+                    <Select
+                      value={l.productId}
+                      onChange={(e) => updateLine(i, { productId: e.target.value })}
+                    >
+                      {products.data?.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.sku ? `${p.sku} — ${p.name}` : p.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={l.qtyExpected}
+                      onChange={(e) =>
+                        updateLine(i, { qtyExpected: Number(e.target.value) })
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeLine(i)}
+                      aria-label="Remove item"
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        background: "transparent",
+                        border: `1.5px solid ${t.border}`,
+                        color: t.muted,
+                        cursor: "pointer",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addLine}
+                  disabled={noProducts}
+                  style={{
+                    width: "100%",
+                    padding: "10px 16px",
+                    borderTop: `1.5px dashed ${t.border}`,
+                    background: "transparent",
+                    border: "none",
+                    borderBottomLeftRadius: 20,
+                    borderBottomRightRadius: 20,
+                    color: t.primaryDeep,
+                    fontFamily: FONTS.sans,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: noProducts ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  + Add another item
                 </button>
-              </div>
-            ))}
+              </Card>
+            )}
           </div>
 
           <div>
@@ -352,12 +411,18 @@ export default function NewInboundPage() {
             )}
             {invalidLines && (
               <div style={{ marginTop: 8, color: t.coral, fontSize: 12 }}>
-                One or more lines is missing a product. Pick a product on every line before saving.
+                One or more items is missing a product. Pick a product on every row before saving.
               </div>
             )}
           </div>
         </form>
       </Card>
+
+      <NewCustomerModal
+        open={newCustomerOpen}
+        onClose={() => setNewCustomerOpen(false)}
+        onCreated={(id) => setCustomerId(id)}
+      />
     </div>
   );
 }

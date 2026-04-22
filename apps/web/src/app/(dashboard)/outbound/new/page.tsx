@@ -7,6 +7,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { HelpText } from "~/components/address-fields";
+import { NewCustomerModal } from "~/components/new-customer-modal";
 
 interface Line {
   productId: string;
@@ -33,6 +34,24 @@ export default function NewOutboundPage() {
   const [customerId, setCustomerId] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+
+  function addLine() {
+    const firstProductId = products.data?.[0]?.id;
+    if (!firstProductId) return;
+    setLines((prev) => [...prev, { productId: firstProductId, qtyOrdered: 1 }]);
+  }
+  function updateLine(i: number, patch: Partial<Line>) {
+    setLines(lines.map((l, j) => (i === j ? { ...l, ...patch } : l)));
+  }
+  function removeLine(i: number) {
+    setLines(lines.filter((_, j) => j !== i));
+  }
+
+  const invalidLines = lines.some((l) => !l.productId);
+  const canSubmit =
+    !create.isPending && !!warehouseId && !!reference.trim() && lines.length > 0 && !invalidLines;
+  const noProducts = (products.data?.length ?? 0) === 0;
 
   return (
     <div>
@@ -43,10 +62,30 @@ export default function NewOutboundPage() {
       />
 
       <Card t={t}>
+        {noProducts && (
+          <div
+            style={{
+              background: t.coralSoft,
+              color: t.ink,
+              padding: "10px 14px",
+              borderRadius: 10,
+              marginBottom: 14,
+              fontSize: 13,
+            }}
+          >
+            No products in your catalog yet. Add one at{" "}
+            <a href="/products" style={{ color: t.primaryDeep, fontWeight: 600 }}>
+              /products
+            </a>{" "}
+            before creating an outbound — orders need at least one item.
+          </div>
+        )}
+
         <form
           style={{ display: "flex", flexDirection: "column", gap: 18 }}
           onSubmit={(e) => {
             e.preventDefault();
+            if (!canSubmit) return;
             create.mutate({
               warehouseId,
               reference,
@@ -56,8 +95,10 @@ export default function NewOutboundPage() {
             });
           }}
         >
-          {/* Essentials first. */}
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+          <div
+            data-collapse-grid
+            style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}
+          >
             <Field label="Warehouse">
               <Select
                 value={warehouseId}
@@ -106,17 +147,33 @@ export default function NewOutboundPage() {
           </button>
 
           {showAdvanced && (
-            <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <>
               <Field label="Customer (3PL client)">
-                <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                  <option value="">— none —</option>
-                  {customers.data?.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </Select>
-                <HelpText>Whose stock is this? Set up in Catalog → Customers.</HelpText>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Select
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">— none —</option>
+                    {customers.data?.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="secondary"
+                    size="md"
+                    icon={Ic.Plus}
+                    onClick={() => setNewCustomerOpen(true)}
+                  >
+                    New
+                  </Btn>
+                </div>
+                <HelpText>Whose stock is this? Leave blank for your own stock.</HelpText>
               </Field>
               <Field label="Ship to (prints on shipping label)">
                 <TextField
@@ -125,84 +182,167 @@ export default function NewOutboundPage() {
                   onChange={(e) => setCustomer(e.target.value)}
                   placeholder="Receiver name, e.g. 'Main St Grocery'"
                 />
-                <HelpText>Who receives the truck at the other end. Often different from the customer account.</HelpText>
+                <HelpText>
+                  Who receives the truck at the other end. Often different from the customer account.
+                </HelpText>
               </Field>
-            </div>
+            </>
           )}
 
           <div>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-              <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Lines</div>
-              <Btn
-                t={t}
-                variant="secondary"
-                size="sm"
-                icon={Ic.Plus}
-                type="button"
-                onClick={() =>
-                  setLines([...lines, { productId: products.data?.[0]?.id ?? "", qtyOrdered: 1 }])
-                }
-              >
-                Add line
-              </Btn>
+            <div
+              style={{
+                fontSize: 11,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+                marginBottom: 10,
+              }}
+            >
+              Items on this order
             </div>
 
-            {lines.length === 0 && (
-              <div
+            {lines.length === 0 ? (
+              <button
+                type="button"
+                onClick={addLine}
+                disabled={noProducts}
                 style={{
-                  background: t.surfaceAlt,
-                  borderRadius: 12,
-                  padding: "16px",
-                  border: `1.5px dashed ${t.border}`,
-                  color: t.muted,
-                  fontSize: 13,
-                  textAlign: "center",
-                }}
-              >
-                No lines yet.
-              </div>
-            )}
-
-            {lines.map((l, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 120px",
-                  gap: 10,
-                  padding: "10px 0",
-                  borderTop: i === 0 ? "none" : `1.5px dashed ${t.border}`,
+                  width: "100%",
+                  padding: "28px 16px",
+                  borderRadius: 14,
+                  background: noProducts ? t.surfaceAlt : t.primarySoft,
+                  border: `2px dashed ${noProducts ? t.border : t.primaryDeep}`,
+                  cursor: noProducts ? "not-allowed" : "pointer",
+                  color: noProducts ? t.muted : t.primaryDeep,
+                  fontFamily: FONTS.sans,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
+                  gap: 8,
                 }}
               >
-                <Select
-                  value={l.productId}
-                  onChange={(e) =>
-                    setLines(lines.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))
-                  }
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    background: noProducts ? t.surface : t.primary,
+                    color: noProducts ? t.muted : t.primaryText,
+                    display: "grid",
+                    placeItems: "center",
+                    fontSize: 20,
+                    fontWeight: 700,
+                  }}
                 >
-                  {products.data?.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.sku ? `${p.sku} — ${p.name}` : p.name}
-                    </option>
-                  ))}
-                </Select>
-                <TextField
-                  t={t}
-                  type="number"
-                  min={1}
-                  value={l.qtyOrdered}
-                  style={{ width: 120 }}
-                  onChange={(e) =>
-                    setLines(
-                      lines.map((x, j) =>
-                        j === i ? { ...x, qtyOrdered: Number(e.target.value) } : x,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            ))}
+                  +
+                </div>
+                <div>Add an item to this order</div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
+                  {noProducts
+                    ? "Add a product to your catalog first"
+                    : "Click to pick a product and set the ordered quantity"}
+                </div>
+              </button>
+            ) : (
+              <Card t={t} padding={0}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "40px 1fr 120px 36px",
+                    gap: 10,
+                    padding: "10px 16px",
+                    fontSize: 10.5,
+                    color: t.muted,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                    fontWeight: 600,
+                  }}
+                >
+                  <div>#</div>
+                  <div>Product</div>
+                  <div>Ordered qty</div>
+                  <div />
+                </div>
+                {lines.map((l, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "40px 1fr 120px 36px",
+                      gap: 10,
+                      padding: "10px 16px",
+                      borderTop: `1.5px dashed ${t.border}`,
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                      {i + 1}
+                    </span>
+                    <Select
+                      value={l.productId}
+                      onChange={(e) => updateLine(i, { productId: e.target.value })}
+                    >
+                      {products.data?.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.sku ? `${p.sku} — ${p.name}` : p.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={l.qtyOrdered}
+                      onChange={(e) =>
+                        updateLine(i, { qtyOrdered: Number(e.target.value) })
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeLine(i)}
+                      aria-label="Remove item"
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        background: "transparent",
+                        border: `1.5px solid ${t.border}`,
+                        color: t.muted,
+                        cursor: "pointer",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addLine}
+                  disabled={noProducts}
+                  style={{
+                    width: "100%",
+                    padding: "10px 16px",
+                    borderTop: `1.5px dashed ${t.border}`,
+                    background: "transparent",
+                    border: "none",
+                    borderBottomLeftRadius: 20,
+                    borderBottomRightRadius: 20,
+                    color: t.primaryDeep,
+                    fontFamily: FONTS.sans,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: noProducts ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  + Add another item
+                </button>
+              </Card>
+            )}
           </div>
 
           <div>
@@ -212,13 +352,38 @@ export default function NewOutboundPage() {
               size="md"
               icon={Ic.Check}
               type="submit"
-              disabled={create.isPending || lines.length === 0}
+              disabled={!canSubmit}
             >
               {create.isPending ? "Creating…" : "Create order"}
             </Btn>
+            {create.error && (
+              <div
+                style={{
+                  marginTop: 10,
+                  color: t.coral,
+                  fontSize: 13,
+                  background: t.coralSoft,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                }}
+              >
+                {create.error.message}
+              </div>
+            )}
+            {invalidLines && (
+              <div style={{ marginTop: 8, color: t.coral, fontSize: 12 }}>
+                One or more items is missing a product. Pick a product on every row before saving.
+              </div>
+            )}
           </div>
         </form>
       </Card>
+
+      <NewCustomerModal
+        open={newCustomerOpen}
+        onClose={() => setNewCustomerOpen(false)}
+        onCreated={(id) => setCustomerId(id)}
+      />
     </div>
   );
 }
