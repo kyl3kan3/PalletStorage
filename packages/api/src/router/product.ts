@@ -78,6 +78,8 @@ export const productRouter = router({
         weightKg: z.number().positive().optional(),
         velocityClass: z.enum(["A", "B", "C"]).optional(),
         unitPriceCents: z.number().int().min(0).optional(),
+        unitsPerCase: z.number().int().min(1).optional(),
+        casesPerPallet: z.number().int().min(1).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -92,9 +94,32 @@ export const productRouter = router({
           weightKg: input.weightKg?.toString(),
           velocityClass: input.velocityClass,
           unitPriceCents: input.unitPriceCents,
+          unitsPerCase: input.unitsPerCase ?? 1,
+          casesPerPallet: input.casesPerPallet ?? 1,
         })
         .returning();
       return row;
+    }),
+
+  /** Update the pack hierarchy for an existing product. */
+  setPackHierarchy: tenantProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        unitsPerCase: z.number().int().min(1),
+        casesPerPallet: z.number().int().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      await ctx.db
+        .update(schema.products)
+        .set({
+          unitsPerCase: input.unitsPerCase,
+          casesPerPallet: input.casesPerPallet,
+        })
+        .where(and(eq(schema.products.id, input.id), eq(schema.products.organizationId, orgId)));
+      return { ok: true };
     }),
 
   /**

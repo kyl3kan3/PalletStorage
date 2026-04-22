@@ -395,3 +395,9 @@ ALTER TABLE "inbound_lines"
   ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
 ALTER TABLE "outbound_lines"
   ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
+
+-- 0011_product_pack_hierarchy: units_per_case + cases_per_pallet.
+ALTER TABLE "products"
+  ADD COLUMN IF NOT EXISTS "units_per_case" integer NOT NULL DEFAULT 1;
+ALTER TABLE "products"
+  ADD COLUMN IF NOT EXISTS "cases_per_pallet" integer NOT NULL DEFAULT 1;

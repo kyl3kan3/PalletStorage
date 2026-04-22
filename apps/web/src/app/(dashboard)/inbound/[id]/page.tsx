@@ -9,6 +9,7 @@ import { inboundStatusTone } from "~/lib/statusTone";
 import { friendlyInboundStatus, nextInboundStep } from "~/lib/friendly";
 import { NextStepCard } from "~/components/next-step-card";
 import { useIsManager } from "~/lib/useRole";
+import { toEaches, qtyUnitLabel } from "@wms/core";
 
 export default function InboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -100,7 +101,14 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const [addProductId, setAddProductId] = useState("");
   const [addQty, setAddQty] = useState(1);
 
-  const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
+  const hasShort = lines.some(
+    (l) =>
+      l.qtyReceived <
+      toEaches(l.qtyExpected, l.qtyUnit, {
+        unitsPerCase: l.unitsPerCase,
+        casesPerPallet: l.casesPerPallet,
+      }),
+  );
   const status = order?.status ?? "…";
   const isTerminal = status === "closed" || status === "cancelled";
   const isManager = useIsManager();
@@ -305,7 +313,11 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
           </div>
 
           {lines.map((l, i) => {
-            const v = l.qtyReceived - l.qtyExpected;
+            const expectedEaches = toEaches(l.qtyExpected, l.qtyUnit, {
+              unitsPerCase: l.unitsPerCase,
+              casesPerPallet: l.casesPerPallet,
+            });
+            const v = l.qtyReceived - expectedEaches;
             return (
               <div
                 key={l.id}
@@ -333,14 +345,21 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                       }
                     />
                   ) : (
-                    <span
-                      style={{
-                        fontFamily: FONTS.mono,
-                        color: t.ink,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {l.qtyExpected}
+                    <span style={{ display: "inline-flex", flexDirection: "column" }}>
+                      <span
+                        style={{
+                          fontFamily: FONTS.mono,
+                          color: t.ink,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {l.qtyExpected} {qtyUnitLabel(l.qtyUnit, l.qtyExpected !== 1)}
+                      </span>
+                      {l.qtyUnit !== "each" && (
+                        <span style={{ fontSize: 11, color: t.muted }}>
+                          = {expectedEaches} items
+                        </span>
+                      )}
                     </span>
                   )}
                 </span>

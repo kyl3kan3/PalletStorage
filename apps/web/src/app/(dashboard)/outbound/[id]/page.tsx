@@ -9,6 +9,7 @@ import { outboundStatusTone } from "~/lib/statusTone";
 import { friendlyOutboundStatus, nextOutboundStep } from "~/lib/friendly";
 import { NextStepCard } from "~/components/next-step-card";
 import { useIsManager } from "~/lib/useRole";
+import { toEaches, qtyUnitLabel } from "@wms/core";
 
 export default function OutboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -47,7 +48,15 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
   const canCancel =
     isManager && (status === "draft" || status === "open" || status === "picking");
   const allLinesPicked =
-    lines.length > 0 && lines.every((l) => l.qtyPicked >= l.qtyOrdered);
+    lines.length > 0 &&
+    lines.every(
+      (l) =>
+        l.qtyPicked >=
+        toEaches(l.qtyOrdered, l.qtyUnit, {
+          unitsPerCase: l.unitsPerCase,
+          casesPerPallet: l.casesPerPallet,
+        }),
+    );
 
   return (
     <div>
@@ -153,7 +162,11 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
           <div>Fill</div>
         </div>
         {lines.map((l, i) => {
-          const pct = l.qtyOrdered > 0 ? Math.min(1, l.qtyPicked / l.qtyOrdered) : 0;
+          const orderedEaches = toEaches(l.qtyOrdered, l.qtyUnit, {
+            unitsPerCase: l.unitsPerCase,
+            casesPerPallet: l.casesPerPallet,
+          });
+          const pct = orderedEaches > 0 ? Math.min(1, l.qtyPicked / orderedEaches) : 0;
           return (
             <div
               key={l.id}
@@ -167,8 +180,15 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
               }}
             >
               <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>#{i + 1}</span>
-              <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
-                {l.qtyOrdered}
+              <span style={{ display: "inline-flex", flexDirection: "column" }}>
+                <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+                  {l.qtyOrdered} {qtyUnitLabel(l.qtyUnit, l.qtyOrdered !== 1)}
+                </span>
+                {l.qtyUnit !== "each" && (
+                  <span style={{ fontSize: 11, color: t.muted }}>
+                    = {orderedEaches} items
+                  </span>
+                )}
               </span>
               <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
                 {l.qtyPicked}

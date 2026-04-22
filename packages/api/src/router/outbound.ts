@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
-import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay } from "@wms/core";
+import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay, toEaches } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { assertOutboundTransition, type OutboundStatus } from "./_stateMachine";
@@ -83,8 +83,19 @@ export const outboundRouter = router({
         .limit(1);
       if (!order) return null;
       const lines = await ctx.db
-        .select()
+        .select({
+          id: schema.outboundLines.id,
+          organizationId: schema.outboundLines.organizationId,
+          outboundOrderId: schema.outboundLines.outboundOrderId,
+          productId: schema.outboundLines.productId,
+          qtyOrdered: schema.outboundLines.qtyOrdered,
+          qtyPicked: schema.outboundLines.qtyPicked,
+          qtyUnit: schema.outboundLines.qtyUnit,
+          unitsPerCase: schema.products.unitsPerCase,
+          casesPerPallet: schema.products.casesPerPallet,
+        })
         .from(schema.outboundLines)
+        .leftJoin(schema.products, eq(schema.products.id, schema.outboundLines.productId))
         .where(
           and(
             eq(schema.outboundLines.outboundOrderId, order.id),
@@ -131,6 +142,21 @@ export const outboundRouter = router({
             ),
           );
 
+        // Fetch pack hierarchy for the products on this order, so
+        // qtyOrdered in pallets/cases converts to eaches for allocation.
+        const productIds = Array.from(new Set(lines.map((l) => l.productId)));
+        const packRows = productIds.length
+          ? await tx
+              .select({
+                id: schema.products.id,
+                unitsPerCase: schema.products.unitsPerCase,
+                casesPerPallet: schema.products.casesPerPallet,
+              })
+              .from(schema.products)
+              .where(inArray(schema.products.id, productIds))
+          : [];
+        const packById = new Map(packRows.map((p) => [p.id, p]));
+
         type Candidate = {
           outboundLineId: string;
           palletId: string;
@@ -163,7 +189,9 @@ export const outboundRouter = router({
             );
 
           // FEFO (with FIFO fallback by pallet.createdAt when no expiry set).
-          const remaining = line.qtyOrdered - line.qtyPicked;
+          const pack = packById.get(line.productId) ?? {};
+          const orderedEaches = toEaches(line.qtyOrdered, line.qtyUnit, pack);
+          const remaining = orderedEaches - line.qtyPicked;
           const allocations = allocate(
             remaining,
             stock
@@ -299,7 +327,25 @@ export const outboundRouter = router({
           .select()
           .from(schema.outboundLines)
           .where(eq(schema.outboundLines.outboundOrderId, order.id));
-        const shortLines = lines.filter((l) => l.qtyPicked < l.qtyOrdered);
+
+        // qtyPicked is in eaches; qtyOrdered may be in pallets/cases —
+        // convert via product pack hierarchy.
+        const productIds = Array.from(new Set(lines.map((l) => l.productId)));
+        const packRows = productIds.length
+          ? await tx
+              .select({
+                id: schema.products.id,
+                unitsPerCase: schema.products.unitsPerCase,
+                casesPerPallet: schema.products.casesPerPallet,
+              })
+              .from(schema.products)
+              .where(inArray(schema.products.id, productIds))
+          : [];
+        const packById = new Map(packRows.map((p) => [p.id, p]));
+        const shortLines = lines.filter((l) => {
+          const pack = packById.get(l.productId) ?? {};
+          return l.qtyPicked < toEaches(l.qtyOrdered, l.qtyUnit, pack);
+        });
         if (shortLines.length > 0) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
