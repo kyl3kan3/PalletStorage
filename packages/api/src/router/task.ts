@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
@@ -163,6 +163,3 @@ export const taskRouter = router({
       return { ok: true };
     }),
 });
-
-// Satisfy the imported `or`/`managerProcedure` symbols if only one is used.
-void or;

@@ -18,7 +18,12 @@ export const palletRouter = router({
     const items = await ctx.db
       .select()
       .from(schema.palletItems)
-      .where(eq(schema.palletItems.palletId, pallet.id));
+      .where(
+        and(
+          eq(schema.palletItems.palletId, pallet.id),
+          eq(schema.palletItems.organizationId, orgId),
+        ),
+      );
 
     return { pallet, items };
   }),

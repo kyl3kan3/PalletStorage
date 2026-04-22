@@ -15,10 +15,17 @@ interface Line {
 export default function NewInboundPage() {
   const t = theme;
   const router = useRouter();
+  const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
   const create = trpc.inbound.create.useMutation({
-    onSuccess: (order) => router.push(`/inbound/${order!.id}`),
+    onSuccess: (order) => {
+      // Invalidate the list so "/inbound" reflects the new order the
+      // next time it's visited (React Query's cache would otherwise
+      // keep serving stale rows until the page remounts or refocuses).
+      utils.inbound.list.invalidate();
+      router.push(`/inbound/${order!.id}`);
+    },
   });
 
   const [warehouseId, setWarehouseId] = useState<string>("");

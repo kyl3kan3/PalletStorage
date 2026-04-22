@@ -80,7 +80,12 @@ export const inboundRouter = router({
       const lines = await ctx.db
         .select()
         .from(schema.inboundLines)
-        .where(eq(schema.inboundLines.inboundOrderId, order.id));
+        .where(
+          and(
+            eq(schema.inboundLines.inboundOrderId, order.id),
+            eq(schema.inboundLines.organizationId, orgId),
+          ),
+        );
       return { order, lines };
     }),
 

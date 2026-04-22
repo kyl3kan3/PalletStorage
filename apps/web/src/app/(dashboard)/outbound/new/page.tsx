@@ -15,10 +15,14 @@ interface Line {
 export default function NewOutboundPage() {
   const t = theme;
   const router = useRouter();
+  const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
   const create = trpc.outbound.create.useMutation({
-    onSuccess: (order) => router.push(`/outbound/${order!.id}`),
+    onSuccess: (order) => {
+      utils.outbound.list.invalidate();
+      router.push(`/outbound/${order!.id}`);
+    },
   });
 
   const [warehouseId, setWarehouseId] = useState<string>("");
