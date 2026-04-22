@@ -6,6 +6,7 @@ import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { HelpText } from "~/components/address-fields";
 
 interface Line {
   productId: string;
@@ -31,10 +32,15 @@ export default function NewOutboundPage() {
   const [customer, setCustomer] = useState("");
   const [customerId, setCustomerId] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
     <div>
-      <PageTitle eyebrow="Create a sales order" title="New outbound order" />
+      <PageTitle
+        eyebrow="Sales order"
+        title="New outbound order"
+        subtitle="Set up what's going out and to whom. The shipping label prints automatically once you ship."
+      />
 
       <Card t={t}>
         <form
@@ -50,7 +56,8 @@ export default function NewOutboundPage() {
             });
           }}
         >
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          {/* Essentials first. */}
+          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
             <Field label="Warehouse">
               <Select
                 value={warehouseId}
@@ -64,37 +71,64 @@ export default function NewOutboundPage() {
                   </option>
                 ))}
               </Select>
+              <HelpText>Where the stock is stored now.</HelpText>
             </Field>
-            <Field label="Reference">
+            <Field label="Order number">
               <TextField
                 t={t}
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
+                placeholder="e.g. SO-12345"
                 required
               />
-            </Field>
-            <Field label="Ship to (prints on shipping label)">
-              <TextField
-                t={t}
-                value={customer}
-                onChange={(e) => setCustomer(e.target.value)}
-                placeholder="Who the load ships to"
-              />
+              <HelpText>Your internal order or SO number.</HelpText>
             </Field>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-            <Field label="Link customer (3PL client)">
-              <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                <option value="">— none —</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: t.primaryDeep,
+              fontSize: 12.5,
+              fontWeight: 600,
+              padding: 0,
+              textAlign: "left",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {showAdvanced ? "▾" : "▸"} More details (customer, ship-to)
+          </button>
+
+          {showAdvanced && (
+            <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <Field label="Customer (3PL client)">
+                <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                  <option value="">— none —</option>
+                  {customers.data?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+                <HelpText>Whose stock is this? Set up in Catalog → Customers.</HelpText>
+              </Field>
+              <Field label="Ship to (prints on shipping label)">
+                <TextField
+                  t={t}
+                  value={customer}
+                  onChange={(e) => setCustomer(e.target.value)}
+                  placeholder="Receiver name, e.g. 'Main St Grocery'"
+                />
+                <HelpText>Who receives the truck at the other end. Often different from the customer account.</HelpText>
+              </Field>
+            </div>
+          )}
 
           <div>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>

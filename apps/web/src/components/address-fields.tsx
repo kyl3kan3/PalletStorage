@@ -81,12 +81,14 @@ export function Input({
   onChange,
   type = "text",
   placeholder,
+  help,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
+  help?: string;
 }) {
   return (
     <FormField label={label}>
@@ -96,6 +98,28 @@ export function Input({
         type={type}
         placeholder={placeholder}
       />
+      {help && <HelpText>{help}</HelpText>}
     </FormField>
+  );
+}
+
+/**
+ * Small muted caption under a form field. Use for one-line "what this
+ * is for" context, not for error messages (those get coral styling
+ * nearby). Keeps new operators oriented without making the form
+ * feel like a manual.
+ */
+export function HelpText({ children }: { children: ReactNode }) {
+  return (
+    <span
+      style={{
+        fontSize: 11.5,
+        color: theme.muted,
+        lineHeight: 1.4,
+        fontFamily: FONTS.sans,
+      }}
+    >
+      {children}
+    </span>
   );
 }

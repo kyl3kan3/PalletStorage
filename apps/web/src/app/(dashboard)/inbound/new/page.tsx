@@ -6,6 +6,7 @@ import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { HelpText } from "~/components/address-fields";
 
 interface Line {
   productId: string;
@@ -35,6 +36,7 @@ export default function NewInboundPage() {
   const [receivingLocationId, setReceivingLocationId] = useState<string>("");
   const [expectedAt, setExpectedAt] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Dock + staging locations in the selected warehouse — the candidates
   // for receiving. Fetched only once a warehouse is picked.
@@ -114,7 +116,8 @@ export default function NewInboundPage() {
             });
           }}
         >
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          {/* Essentials — every inbound needs these. */}
+          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
             <Field label="Warehouse">
               <Select
                 value={warehouseId}
@@ -128,6 +131,7 @@ export default function NewInboundPage() {
                   </option>
                 ))}
               </Select>
+              <HelpText>Where the shipment is arriving.</HelpText>
             </Field>
             <Field label="Order number">
               <TextField
@@ -137,62 +141,98 @@ export default function NewInboundPage() {
                 placeholder="PO or reference from the supplier"
                 required
               />
-            </Field>
-            <Field label="Expected on">
-              <TextField
-                t={t}
-                type="date"
-                value={expectedAt}
-                onChange={(e) => setExpectedAt(e.target.value)}
-              />
+              <HelpText>The PO number or any code your supplier put on the paperwork.</HelpText>
             </Field>
           </div>
 
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-            <Field label="Receiving location">
-              <Select
-                value={receivingLocationId}
-                onChange={(e) => setReceivingLocationId(e.target.value)}
-                disabled={!warehouseId}
-              >
-                <option value="">— none —</option>
-                {receivingCandidates.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.code} ({l.type})
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Link supplier">
-              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">— none —</option>
-                {suppliers.data?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Link customer (3PL client)">
-              <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                <option value="">— none —</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
+          {/* Advanced — revealed behind a toggle so the first-time user
+              isn't staring at seven fields before they've picked a
+              warehouse. */}
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: t.primaryDeep,
+              fontSize: 12.5,
+              fontWeight: 600,
+              padding: 0,
+              textAlign: "left",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {showAdvanced ? "▾" : "▸"} More details (supplier, customer, dock, date)
+          </button>
 
-          <Field label="Supplier (free text; prints on receipt)">
-            <TextField
-              t={t}
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value)}
-              placeholder="Optional — only used if you didn't link a supplier above"
-            />
-          </Field>
+          {showAdvanced && (
+            <>
+              <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Expected on">
+                  <TextField
+                    t={t}
+                    type="date"
+                    value={expectedAt}
+                    onChange={(e) => setExpectedAt(e.target.value)}
+                  />
+                  <HelpText>When you expect the truck to arrive.</HelpText>
+                </Field>
+                <Field label="Receiving location">
+                  <Select
+                    value={receivingLocationId}
+                    onChange={(e) => setReceivingLocationId(e.target.value)}
+                    disabled={!warehouseId}
+                  >
+                    <option value="">— none —</option>
+                    {receivingCandidates.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.code} ({l.type})
+                      </option>
+                    ))}
+                  </Select>
+                  <HelpText>Which dock door or staging bin the shipment is headed to.</HelpText>
+                </Field>
+              </div>
+
+              <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Supplier">
+                  <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                    <option value="">— none —</option>
+                    {suppliers.data?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <HelpText>Who's shipping it to you. Set it once in Catalog → Suppliers.</HelpText>
+                </Field>
+                <Field label="Customer (3PL client)">
+                  <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                    <option value="">— none —</option>
+                    {customers.data?.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <HelpText>Which of your clients owns these pallets. Leave blank for your own stock.</HelpText>
+                </Field>
+              </div>
+
+              <Field label="Supplier name (only if no supplier is linked above)">
+                <TextField
+                  t={t}
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                  placeholder="Optional free-text label"
+                />
+                <HelpText>Shows on the printed receipt. Usually you'll pick a linked supplier instead.</HelpText>
+              </Field>
+            </>
+          )}
 
           <div>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
