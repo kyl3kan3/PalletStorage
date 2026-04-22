@@ -205,6 +205,16 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
       <div style={{ marginTop: 16 }}>
         <Card t={t}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <a
+              href={`/api/inbound-orders/${id}/receipt.pdf`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ textDecoration: "none" }}
+            >
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Download}>
+                Download receipt
+              </Btn>
+            </a>
             <Btn
               t={t}
               variant="secondary"

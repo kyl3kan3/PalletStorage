@@ -49,6 +49,27 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     .limit(1);
   if (!order) return NextResponse.json({ error: "order not found" }, { status: 404 });
 
+  // Prefer the linked customer's shipping address when the order has one;
+  // fall back to the free-text `customer` field for legacy/manual orders.
+  let consigneeName = order.customer ?? "—";
+  let consigneeAddress: string[] = [];
+  if (order.customerId) {
+    const [c] = await db
+      .select()
+      .from(schema.customers)
+      .where(eq(schema.customers.id, order.customerId))
+      .limit(1);
+    if (c) {
+      consigneeName = c.name;
+      consigneeAddress = [
+        c.shippingLine1,
+        c.shippingLine2,
+        [c.shippingCity, c.shippingRegion].filter(Boolean).join(", "),
+        [c.shippingPostalCode, c.shippingCountry].filter(Boolean).join(" "),
+      ].filter(Boolean) as string[];
+    }
+  }
+
   const lines = await db
     .select({
       sku: schema.products.sku,
@@ -96,7 +117,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         <View style={styles.metaRow}>
           <View style={styles.metaCol}>
             <Text style={styles.metaLabel}>Consignee</Text>
-            <Text style={styles.metaValue}>{order.customer ?? "—"}</Text>
+            <Text style={styles.metaValue}>{consigneeName}</Text>
+            {consigneeAddress.map((l, i) => (
+              <Text key={i} style={styles.addressLine}>
+                {l}
+              </Text>
+            ))}
           </View>
           <View style={styles.metaCol}>
             <Text style={styles.metaLabel}>Carrier</Text>
@@ -160,6 +186,7 @@ const styles = StyleSheet.create({
   metaCol: { flex: 1, paddingRight: 8 },
   metaLabel: { fontSize: 8, color: "#555", textTransform: "uppercase" },
   metaValue: { fontSize: 11, marginTop: 2 },
+  addressLine: { fontSize: 9, color: "#555", marginTop: 1 },
   table: { marginTop: 12, borderWidth: 1, borderColor: "#000" },
   tableHeader: { flexDirection: "row", backgroundColor: "#eee", borderBottomWidth: 1 },
   tableRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: "#aaa" },
