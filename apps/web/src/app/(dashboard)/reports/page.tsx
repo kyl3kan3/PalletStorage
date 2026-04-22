@@ -18,9 +18,9 @@ export default function ReportsPage() {
   return (
     <div>
       <PageTitle
-        eyebrow="How the floor is doing"
+        eyebrow="Drill into the data"
         title="Reports"
-        subtitle="Pick a report to drill into. Each one has date filters, totals, and CSV + PDF download."
+        subtitle="Pick a report to drill into. Each one has date filters, totals, and CSV + PDF download. The day-to-day KPI dashboard lives on Home."
       />
 
       <div
@@ -30,13 +30,6 @@ export default function ReportsPage() {
           gap: 14,
         }}
       >
-        <Tile
-          href="/reports/overview"
-          icon={Ic.Chart}
-          tint="primary"
-          title="Overview"
-          desc="KPI tiles, throughput chart, dock-to-stock ring, top SKUs + recent activity."
-        />
         <Tile
           href="/reports/shipped"
           icon={Ic.Truck}

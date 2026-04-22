@@ -24,16 +24,11 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "Home", icon: Ic.Home },
   { href: "/tasks", label: "My tasks", icon: Ic.Check },
-  { href: "/reports", label: "Reports", icon: Ic.Chart },
   { href: "/inbound", label: "Inbound", icon: Ic.Inbound },
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
   { href: "/inventory", label: "Inventory", icon: Ic.Scan },
-  { href: "/products", label: "Products", icon: Ic.Boxes },
-  { href: "/customers", label: "Customers", icon: Ic.User },
-  { href: "/suppliers", label: "Suppliers", icon: Ic.Truck },
-  { href: "/warehouses", label: "Warehouses", icon: Ic.Warehouse },
-  { href: "/inventory/counts", label: "Cycle counts", icon: Ic.Clipboard },
-  { href: "/settings", label: "Settings", icon: Ic.Settings },
+  { href: "/catalog", label: "Catalog", icon: Ic.Boxes },
+  { href: "/reports", label: "Reports", icon: Ic.Chart },
 ];
 
 function activeHref(pathname: string): string | null {
@@ -202,7 +197,19 @@ export function Shell({ children }: { children: ReactNode }) {
               userProfileMode="navigation"
               userProfileUrl="/account"
               afterSignOutUrl="/"
-            />
+            >
+              {/* Custom menu entries alongside Clerk's default
+                  Manage-account / Sign-out. Clerk renders them in
+                  insertion order. Settings moved here from the main
+                  sidebar so the left nav stays short. */}
+              <UserButton.MenuItems>
+                <UserButton.Link
+                  label="Settings"
+                  labelIcon={<Ic.Settings size={14} />}
+                  href="/settings"
+                />
+              </UserButton.MenuItems>
+            </UserButton>
           </SignedIn>
         </header>
 

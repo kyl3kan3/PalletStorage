@@ -3,12 +3,17 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, Ring, StatBig, Tabs, Tag } from "~/components/kit";
-import { Ic } from "~/components/icons";
+import { Card, Ring, StatBig, Tabs, Tag } from "./kit";
 import { formatDuration, movementReasonTone } from "~/lib/statusTone";
-import { BackLink } from "~/components/back-link";
 
-export default function ReportsPage() {
+/**
+ * Operator overview dashboard. Rendered on the signed-in root page
+ * as the default landing view. Extracted from the old
+ * /reports/overview route so the root page can compose it alongside
+ * a greeting or any future hero elements without duplicating the
+ * chart code.
+ */
+export function OverviewDashboard() {
   const t = theme;
   const [tab, setTab] = useState("week");
   const summary = trpc.report.summary.useQuery();
@@ -18,21 +23,13 @@ export default function ReportsPage() {
   const throughput = trpc.report.throughput.useQuery({ days: 14 });
 
   const bars = collapseThroughput(throughput.data ?? []);
-
-  // For dock-to-stock ring: arbitrary target = 60 min p95; show how close
-  // p95 is to that target (1.0 = at target, less = faster).
   const dtsP95 = dts.data?.p95_seconds ?? 0;
+  // Progress-ring target: 60-minute p95 dock-to-stock. 1.0 = at target,
+  // less = faster.
   const ringValue = Math.min(1, dtsP95 / (60 * 60));
 
   return (
     <div>
-      <BackLink href="/reports" label="Back to reports" />
-      <PageTitle
-        eyebrow="How the floor is doing"
-        title="Overview"
-        subtitle="Numbers for this week, rolled up and easy to scan."
-      />
-
       <div
         data-collapse-grid
         style={{
@@ -52,8 +49,8 @@ export default function ReportsPage() {
         <Card t={t} padding={22}>
           <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 16 }}>
             <div style={{ flex: 1 }}>
-              <SectionEyebrow t={t}>Throughput</SectionEyebrow>
-              <SectionTitle t={t}>Movements over the last 14 days</SectionTitle>
+              <SectionEyebrow>Throughput</SectionEyebrow>
+              <SectionTitle>Movements over the last 14 days</SectionTitle>
             </div>
             <Tabs
               t={t}
@@ -113,8 +110,8 @@ export default function ReportsPage() {
         </Card>
 
         <Card t={t} padding={22}>
-          <SectionEyebrow t={t}>Dock-to-stock</SectionEyebrow>
-          <SectionTitle t={t}>
+          <SectionEyebrow>Dock-to-stock</SectionEyebrow>
+          <SectionTitle>
             {dts.data?.n ? "Based on real receipts" : "No receipts yet"}
           </SectionTitle>
           <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 18 }}>
@@ -137,8 +134,8 @@ export default function ReportsPage() {
       <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 16 }}>
         <Card t={t} padding={0}>
           <div style={{ padding: "16px 22px 10px" }}>
-            <SectionEyebrow t={t}>Top stock</SectionEyebrow>
-            <SectionTitle t={t}>Most on hand</SectionTitle>
+            <SectionEyebrow>Top stock</SectionEyebrow>
+            <SectionTitle>Most on hand</SectionTitle>
           </div>
           {(soh.data?.length ?? 0) === 0 && (
             <div style={{ padding: "20px 22px", color: t.muted, fontSize: 13 }}>
@@ -181,8 +178,8 @@ export default function ReportsPage() {
 
         <Card t={t} padding={0}>
           <div style={{ padding: "16px 22px 10px" }}>
-            <SectionEyebrow t={t}>Movements</SectionEyebrow>
-            <SectionTitle t={t}>Recent activity</SectionTitle>
+            <SectionEyebrow>Movements</SectionEyebrow>
+            <SectionTitle>Recent activity</SectionTitle>
           </div>
           {(movements.data?.length ?? 0) === 0 && (
             <div style={{ padding: "20px 22px", color: t.muted, fontSize: 13 }}>
@@ -233,12 +230,12 @@ export default function ReportsPage() {
   );
 }
 
-function SectionEyebrow({ t, children }: { t: typeof theme; children: React.ReactNode }) {
+function SectionEyebrow({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
         fontSize: 11,
-        color: t.muted,
+        color: theme.muted,
         textTransform: "uppercase",
         letterSpacing: 0.6,
         fontWeight: 600,
@@ -249,14 +246,14 @@ function SectionEyebrow({ t, children }: { t: typeof theme; children: React.Reac
   );
 }
 
-function SectionTitle({ t, children }: { t: typeof theme; children: React.ReactNode }) {
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
         fontFamily: FONTS.display,
         fontSize: 20,
         fontWeight: 600,
-        color: t.ink,
+        color: theme.ink,
         letterSpacing: -0.3,
       }}
     >
@@ -274,7 +271,6 @@ function Pair({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Group the throughput rows (one per day+reason) into a single daily total. */
 function collapseThroughput(
   rows: ReadonlyArray<{ day: string; reason: string; n: number }>,
 ): Array<{ day: string; total: number }> {

@@ -8,18 +8,17 @@ import { Card, PageTitle, SquircleIcon, type IconTint } from "~/components/kit";
 import { Ic } from "~/components/icons";
 
 /**
- * Inventory hub — tiles for the day-to-day operator actions that
- * touch stock. Scan lookup, cycle counts, and eventually stock-on-hand
- * / aging reports will live here. Matches the /reports and /settings
- * hub pattern so nav stays predictable.
+ * Reference-data hub. Everything that's "a directory of things" (as
+ * opposed to an operational view of the floor) lives here so the main
+ * sidebar doesn't grow one entry per entity type.
  */
-export default function InventoryPage() {
+export default function CatalogPage() {
   return (
     <div>
       <PageTitle
-        eyebrow="What's on the floor"
-        title="Inventory"
-        subtitle="Scan labels, run cycle counts, and check stock — one place for anything touching pallets in place."
+        eyebrow="Your reference data"
+        title="Catalog"
+        subtitle="The directories behind every order and pallet. Change these once; they show up everywhere."
       />
 
       <div
@@ -30,18 +29,32 @@ export default function InventoryPage() {
         }}
       >
         <Tile
-          href="/inventory/scan"
-          icon={Ic.Scan}
+          href="/products"
+          icon={Ic.Boxes}
           tint="primary"
-          title="Scan"
-          desc="Resolve a pallet LPN or location label to its record."
+          title="Products"
+          desc="SKUs, barcodes, velocity classes, unit prices used on Bills and Invoices."
         />
         <Tile
-          href="/inventory/counts"
-          icon={Ic.Clipboard}
+          href="/customers"
+          icon={Ic.User}
+          tint="mint"
+          title="Customers"
+          desc="3PL clients whose pallets you store. Linked from outbound and inbound orders."
+        />
+        <Tile
+          href="/suppliers"
+          icon={Ic.Truck}
+          tint="coral"
+          title="Suppliers"
+          desc="Upstream vendors. Populates the supplier block on receiving receipts."
+        />
+        <Tile
+          href="/warehouses"
+          icon={Ic.Warehouse}
           tint="sky"
-          title="Cycle counts"
-          desc="Open and in-progress stock takes. Submit counts, approve variances."
+          title="Warehouses"
+          desc="Sites, zones, racks, and the locations within them."
         />
       </div>
     </div>
