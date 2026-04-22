@@ -386,3 +386,12 @@ EXCEPTION WHEN duplicate_object THEN null; END $$;
 -- still enforces isolation (every procedure filters by orgId). Re-enable
 -- RLS by applying migrations/0001_rls.sql once tRPC sets
 -- `SET LOCAL app.org_id` per transaction.
+
+-- 0010_qty_unit: unit of measure on order lines (pallets/cases/eaches).
+DO $$ BEGIN
+  CREATE TYPE "qty_unit" AS ENUM ('each', 'case', 'pallet');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TABLE "inbound_lines"
+  ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
+ALTER TABLE "outbound_lines"
+  ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';

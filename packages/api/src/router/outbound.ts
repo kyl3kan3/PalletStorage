@@ -36,6 +36,7 @@ export const outboundRouter = router({
             z.object({
               productId: z.string().uuid(),
               qtyOrdered: z.number().int().positive(),
+              qtyUnit: z.enum(["each", "case", "pallet"]).optional(),
             }),
           )
           .min(1),
@@ -63,6 +64,7 @@ export const outboundRouter = router({
             outboundOrderId: order!.id,
             productId: l.productId,
             qtyOrdered: l.qtyOrdered,
+            qtyUnit: l.qtyUnit ?? "each",
           })),
         );
         return order;

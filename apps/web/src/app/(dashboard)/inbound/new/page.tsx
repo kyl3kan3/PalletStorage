@@ -10,9 +10,12 @@ import { HelpText } from "~/components/address-fields";
 import { NewCustomerModal } from "~/components/new-customer-modal";
 import { NewProductModal } from "~/components/new-product-modal";
 
+type QtyUnit = "each" | "case" | "pallet";
+
 interface Line {
   productId: string;
   qtyExpected: number;
+  qtyUnit: QtyUnit;
 }
 
 export default function NewInboundPage() {
@@ -49,20 +52,25 @@ export default function NewInboundPage() {
     [locations.data],
   );
 
+  // "+ Add another item" — appends a row with the first catalog product
+  // pre-selected so the user can change it. If the catalog is empty it
+  // falls through to creating a product (same popup as the big empty-
+  // state button).
   function addLine() {
     const firstProductId = products.data?.[0]?.id;
     if (!firstProductId) {
-      // No catalog yet — jump straight to creating a product, then
-      // append a line for it on success.
       setNewProductRow(-1);
       return;
     }
-    setLines((prev) => [...prev, { productId: firstProductId, qtyExpected: 1 }]);
+    setLines((prev) => [
+      ...prev,
+      { productId: firstProductId, qtyExpected: 1, qtyUnit: "each" },
+    ]);
   }
   function onProductCreated(id: string) {
     if (newProductRow === null) return;
     if (newProductRow === -1) {
-      setLines((prev) => [...prev, { productId: id, qtyExpected: 1 }]);
+      setLines((prev) => [...prev, { productId: id, qtyExpected: 1, qtyUnit: "each" }]);
     } else {
       const row = newProductRow;
       setLines((prev) => prev.map((l, j) => (j === row ? { ...l, productId: id } : l)));
@@ -272,7 +280,7 @@ export default function NewInboundPage() {
             {lines.length === 0 ? (
               <button
                 type="button"
-                onClick={addLine}
+                onClick={() => setNewProductRow(-1)}
                 style={{
                   width: "100%",
                   padding: "28px 16px",
@@ -307,9 +315,7 @@ export default function NewInboundPage() {
                 </div>
                 <div>Add an item to this shipment</div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
-                  {noProducts
-                    ? "We'll help you add a product along the way"
-                    : "Click to pick a product and set the expected quantity"}
+                  Click to create a new product and add it to this shipment
                 </div>
               </button>
             ) : (
@@ -317,7 +323,7 @@ export default function NewInboundPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "40px 1fr 120px 36px",
+                    gridTemplateColumns: "40px 1fr 180px 36px",
                     gap: 10,
                     padding: "10px 16px",
                     fontSize: 10.5,
@@ -337,7 +343,7 @@ export default function NewInboundPage() {
                     key={i}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "40px 1fr 120px 36px",
+                      gridTemplateColumns: "40px 1fr 180px 36px",
                       gap: 10,
                       padding: "10px 16px",
                       borderTop: `1.5px dashed ${t.border}`,
@@ -380,15 +386,30 @@ export default function NewInboundPage() {
                         +
                       </button>
                     </div>
-                    <TextField
-                      t={t}
-                      type="number"
-                      min={1}
-                      value={l.qtyExpected}
-                      onChange={(e) =>
-                        updateLine(i, { qtyExpected: Number(e.target.value) })
-                      }
-                    />
+                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                      <TextField
+                        t={t}
+                        type="number"
+                        min={1}
+                        value={l.qtyExpected}
+                        onChange={(e) =>
+                          updateLine(i, { qtyExpected: Number(e.target.value) })
+                        }
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <Select
+                        value={l.qtyUnit}
+                        onChange={(e) =>
+                          updateLine(i, { qtyUnit: e.target.value as QtyUnit })
+                        }
+                        aria-label="Unit"
+                        style={{ width: 90 }}
+                      >
+                        <option value="each">items</option>
+                        <option value="case">cases</option>
+                        <option value="pallet">pallets</option>
+                      </Select>
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeLine(i)}

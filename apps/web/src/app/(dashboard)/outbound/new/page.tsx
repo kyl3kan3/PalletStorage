@@ -10,9 +10,12 @@ import { HelpText } from "~/components/address-fields";
 import { NewCustomerModal } from "~/components/new-customer-modal";
 import { NewProductModal } from "~/components/new-product-modal";
 
+type QtyUnit = "each" | "case" | "pallet";
+
 interface Line {
   productId: string;
   qtyOrdered: number;
+  qtyUnit: QtyUnit;
 }
 
 export default function NewOutboundPage() {
@@ -44,12 +47,15 @@ export default function NewOutboundPage() {
       setNewProductRow(-1);
       return;
     }
-    setLines((prev) => [...prev, { productId: firstProductId, qtyOrdered: 1 }]);
+    setLines((prev) => [
+      ...prev,
+      { productId: firstProductId, qtyOrdered: 1, qtyUnit: "each" },
+    ]);
   }
   function onProductCreated(id: string) {
     if (newProductRow === null) return;
     if (newProductRow === -1) {
-      setLines((prev) => [...prev, { productId: id, qtyOrdered: 1 }]);
+      setLines((prev) => [...prev, { productId: id, qtyOrdered: 1, qtyUnit: "each" }]);
     } else {
       const row = newProductRow;
       setLines((prev) => prev.map((l, j) => (j === row ? { ...l, productId: id } : l)));
@@ -231,7 +237,7 @@ export default function NewOutboundPage() {
             {lines.length === 0 ? (
               <button
                 type="button"
-                onClick={addLine}
+                onClick={() => setNewProductRow(-1)}
                 style={{
                   width: "100%",
                   padding: "28px 16px",
@@ -266,9 +272,7 @@ export default function NewOutboundPage() {
                 </div>
                 <div>Add an item to this order</div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
-                  {noProducts
-                    ? "We'll help you add a product along the way"
-                    : "Click to pick a product and set the ordered quantity"}
+                  Click to create a new product and add it to this order
                 </div>
               </button>
             ) : (
@@ -276,7 +280,7 @@ export default function NewOutboundPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "40px 1fr 120px 36px",
+                    gridTemplateColumns: "40px 1fr 180px 36px",
                     gap: 10,
                     padding: "10px 16px",
                     fontSize: 10.5,
@@ -296,7 +300,7 @@ export default function NewOutboundPage() {
                     key={i}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "40px 1fr 120px 36px",
+                      gridTemplateColumns: "40px 1fr 180px 36px",
                       gap: 10,
                       padding: "10px 16px",
                       borderTop: `1.5px dashed ${t.border}`,
@@ -339,15 +343,30 @@ export default function NewOutboundPage() {
                         +
                       </button>
                     </div>
-                    <TextField
-                      t={t}
-                      type="number"
-                      min={1}
-                      value={l.qtyOrdered}
-                      onChange={(e) =>
-                        updateLine(i, { qtyOrdered: Number(e.target.value) })
-                      }
-                    />
+                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                      <TextField
+                        t={t}
+                        type="number"
+                        min={1}
+                        value={l.qtyOrdered}
+                        onChange={(e) =>
+                          updateLine(i, { qtyOrdered: Number(e.target.value) })
+                        }
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <Select
+                        value={l.qtyUnit}
+                        onChange={(e) =>
+                          updateLine(i, { qtyUnit: e.target.value as QtyUnit })
+                        }
+                        aria-label="Unit"
+                        style={{ width: 90 }}
+                      >
+                        <option value="each">items</option>
+                        <option value="case">cases</option>
+                        <option value="pallet">pallets</option>
+                      </Select>
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeLine(i)}

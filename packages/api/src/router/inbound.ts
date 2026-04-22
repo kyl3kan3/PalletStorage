@@ -37,6 +37,7 @@ export const inboundRouter = router({
             z.object({
               productId: z.string().uuid(),
               qtyExpected: z.number().int().positive(),
+              qtyUnit: z.enum(["each", "case", "pallet"]).optional(),
             }),
           )
           .min(1),
@@ -66,6 +67,7 @@ export const inboundRouter = router({
             inboundOrderId: order!.id,
             productId: l.productId,
             qtyExpected: l.qtyExpected,
+            qtyUnit: l.qtyUnit ?? "each",
           })),
         );
         return order;
@@ -171,6 +173,7 @@ export const inboundRouter = router({
         inboundOrderId: z.string().uuid(),
         productId: z.string().uuid(),
         qtyExpected: z.number().int().positive(),
+        qtyUnit: z.enum(["each", "case", "pallet"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -200,6 +203,7 @@ export const inboundRouter = router({
           inboundOrderId: input.inboundOrderId,
           productId: input.productId,
           qtyExpected: input.qtyExpected,
+          qtyUnit: input.qtyUnit ?? "each",
         })
         .returning();
       return row;

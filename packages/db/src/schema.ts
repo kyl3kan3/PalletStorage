@@ -54,6 +54,7 @@ export const cycleCountStatus = pgEnum("cycle_count_status", [
   "closed",
   "cancelled",
 ]);
+export const qtyUnit = pgEnum("qty_unit", ["each", "case", "pallet"]);
 
 // ──────────────────────────────────────────────────────────────────────
 // Tenancy
@@ -364,6 +365,7 @@ export const inboundLines = pgTable("inbound_lines", {
     .references(() => products.id),
   qtyExpected: integer("qty_expected").notNull(),
   qtyReceived: integer("qty_received").notNull().default(0),
+  qtyUnit: qtyUnit("qty_unit").notNull().default("each"),
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -411,6 +413,7 @@ export const outboundLines = pgTable("outbound_lines", {
     .references(() => products.id),
   qtyOrdered: integer("qty_ordered").notNull(),
   qtyPicked: integer("qty_picked").notNull().default(0),
+  qtyUnit: qtyUnit("qty_unit").notNull().default("each"),
 });
 
 export const picks = pgTable(
