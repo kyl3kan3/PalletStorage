@@ -28,6 +28,8 @@ export const inboundRouter = router({
         warehouseId: z.string().uuid(),
         reference: z.string().min(1),
         supplier: z.string().optional(),
+        supplierId: z.string().uuid().nullable().optional(),
+        customerId: z.string().uuid().nullable().optional(),
         expectedAt: z.date().optional(),
         lines: z
           .array(
@@ -49,6 +51,8 @@ export const inboundRouter = router({
             warehouseId: input.warehouseId,
             reference: input.reference,
             supplier: input.supplier,
+            supplierId: input.supplierId ?? null,
+            customerId: input.customerId ?? null,
             expectedAt: input.expectedAt,
             status: "open",
           })

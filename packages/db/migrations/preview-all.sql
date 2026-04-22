@@ -71,6 +71,51 @@ CREATE TABLE IF NOT EXISTS "memberships" (
   PRIMARY KEY ("organization_id", "user_id")
 );
 
+CREATE TABLE IF NOT EXISTS "customers" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
+  "name" text NOT NULL,
+  "contact_name" text,
+  "email" text,
+  "phone" text,
+  "tax_id" text,
+  "billing_line1" text,
+  "billing_line2" text,
+  "billing_city" text,
+  "billing_region" text,
+  "billing_postal_code" text,
+  "billing_country" text,
+  "shipping_line1" text,
+  "shipping_line2" text,
+  "shipping_city" text,
+  "shipping_region" text,
+  "shipping_postal_code" text,
+  "shipping_country" text,
+  "notes" text,
+  "active" boolean DEFAULT true NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "customers_org_name_idx" ON "customers" ("organization_id", "name");
+
+CREATE TABLE IF NOT EXISTS "suppliers" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
+  "name" text NOT NULL,
+  "contact_name" text,
+  "email" text,
+  "phone" text,
+  "address_line1" text,
+  "address_line2" text,
+  "city" text,
+  "region" text,
+  "postal_code" text,
+  "country" text,
+  "notes" text,
+  "active" boolean DEFAULT true NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "suppliers_org_name_idx" ON "suppliers" ("organization_id", "name");
+
 CREATE TABLE IF NOT EXISTS "warehouses" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
@@ -125,12 +170,15 @@ CREATE TABLE IF NOT EXISTS "pallets" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
   "warehouse_id" uuid NOT NULL REFERENCES "warehouses"("id") ON DELETE CASCADE,
+  "customer_id" uuid REFERENCES "customers"("id") ON DELETE SET NULL,
   "lpn" text NOT NULL,
   "status" "pallet_status" DEFAULT 'in_transit' NOT NULL,
   "current_location_id" uuid REFERENCES "locations"("id") ON DELETE SET NULL,
   "weight_kg" numeric(10, 3),
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+ALTER TABLE "pallets" ADD COLUMN IF NOT EXISTS "customer_id" uuid
+  REFERENCES "customers"("id") ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "pallets_org_lpn_uq" ON "pallets" ("organization_id", "lpn");
 CREATE INDEX IF NOT EXISTS "pallets_org_idx" ON "pallets" ("organization_id");
 CREATE INDEX IF NOT EXISTS "pallets_location_idx" ON "pallets" ("current_location_id");
@@ -153,6 +201,8 @@ CREATE TABLE IF NOT EXISTS "inbound_orders" (
   "warehouse_id" uuid NOT NULL REFERENCES "warehouses"("id"),
   "reference" text NOT NULL,
   "supplier" text,
+  "supplier_id" uuid REFERENCES "suppliers"("id") ON DELETE SET NULL,
+  "customer_id" uuid REFERENCES "customers"("id") ON DELETE SET NULL,
   "status" "inbound_status" DEFAULT 'draft' NOT NULL,
   "expected_at" timestamp with time zone,
   "received_at" timestamp with time zone,
@@ -161,6 +211,10 @@ CREATE TABLE IF NOT EXISTS "inbound_orders" (
   "close_reason" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+ALTER TABLE "inbound_orders" ADD COLUMN IF NOT EXISTS "supplier_id" uuid
+  REFERENCES "suppliers"("id") ON DELETE SET NULL;
+ALTER TABLE "inbound_orders" ADD COLUMN IF NOT EXISTS "customer_id" uuid
+  REFERENCES "customers"("id") ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "inbound_org_ref_uq" ON "inbound_orders" ("organization_id", "reference");
 
 CREATE TABLE IF NOT EXISTS "inbound_lines" (
@@ -178,6 +232,7 @@ CREATE TABLE IF NOT EXISTS "outbound_orders" (
   "warehouse_id" uuid NOT NULL REFERENCES "warehouses"("id"),
   "reference" text NOT NULL,
   "customer" text,
+  "customer_id" uuid REFERENCES "customers"("id") ON DELETE SET NULL,
   "status" "outbound_status" DEFAULT 'draft' NOT NULL,
   "ship_by" timestamp with time zone,
   "shipped_at" timestamp with time zone,
@@ -186,6 +241,8 @@ CREATE TABLE IF NOT EXISTS "outbound_orders" (
   "cancel_reason" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+ALTER TABLE "outbound_orders" ADD COLUMN IF NOT EXISTS "customer_id" uuid
+  REFERENCES "customers"("id") ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "outbound_org_ref_uq" ON "outbound_orders" ("organization_id", "reference");
 
 CREATE TABLE IF NOT EXISTS "outbound_lines" (

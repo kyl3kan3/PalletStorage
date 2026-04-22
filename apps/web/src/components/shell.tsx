@@ -29,6 +29,8 @@ const NAV: NavItem[] = [
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
   { href: "/inventory", label: "Inventory", icon: Ic.Scan },
   { href: "/products", label: "Products", icon: Ic.Boxes },
+  { href: "/customers", label: "Customers", icon: Ic.User },
+  { href: "/suppliers", label: "Suppliers", icon: Ic.Truck },
   { href: "/warehouses", label: "Warehouses", icon: Ic.Warehouse },
   { href: "/inventory/counts", label: "Cycle counts", icon: Ic.Clipboard },
   { href: "/settings", label: "Settings", icon: Ic.Settings },

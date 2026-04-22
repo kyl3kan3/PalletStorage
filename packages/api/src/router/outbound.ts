@@ -29,6 +29,7 @@ export const outboundRouter = router({
         warehouseId: z.string().uuid(),
         reference: z.string().min(1),
         customer: z.string().optional(),
+        customerId: z.string().uuid().nullable().optional(),
         shipBy: z.date().optional(),
         lines: z
           .array(
@@ -50,6 +51,7 @@ export const outboundRouter = router({
             warehouseId: input.warehouseId,
             reference: input.reference,
             customer: input.customer,
+            customerId: input.customerId ?? null,
             shipBy: input.shipBy,
             status: "open",
           })

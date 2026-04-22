@@ -18,6 +18,8 @@ export default function NewInboundPage() {
   const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
+  const suppliers = trpc.supplier.search.useQuery({ q: "", limit: 100 });
+  const customers = trpc.customer.search.useQuery({ q: "", limit: 100 });
   const create = trpc.inbound.create.useMutation({
     onSuccess: (order) => {
       // Invalidate the list so "/inbound" reflects the new order the
@@ -31,6 +33,8 @@ export default function NewInboundPage() {
   const [warehouseId, setWarehouseId] = useState<string>("");
   const [reference, setReference] = useState("");
   const [supplier, setSupplier] = useState("");
+  const [supplierId, setSupplierId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
 
   function addLine() {
@@ -50,7 +54,14 @@ export default function NewInboundPage() {
           onSubmit={(e) => {
             e.preventDefault();
             if (!warehouseId || lines.length === 0) return;
-            create.mutate({ warehouseId, reference, supplier: supplier || undefined, lines });
+            create.mutate({
+              warehouseId,
+              reference,
+              supplier: supplier || undefined,
+              supplierId: supplierId || undefined,
+              customerId: customerId || undefined,
+              lines,
+            });
           }}
         >
           <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
@@ -76,12 +87,36 @@ export default function NewInboundPage() {
                 required
               />
             </Field>
-            <Field label="Supplier">
+            <Field label="Supplier (free text)">
               <TextField
                 t={t}
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
+                placeholder="Legacy label; optional"
               />
+            </Field>
+          </div>
+
+          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Link supplier">
+              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                <option value="">— none —</option>
+                {suppliers.data?.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Link customer (3PL client)">
+              <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                <option value="">— none —</option>
+                {customers.data?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </div>
 

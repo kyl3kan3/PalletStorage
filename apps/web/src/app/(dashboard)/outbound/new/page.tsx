@@ -18,6 +18,7 @@ export default function NewOutboundPage() {
   const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
+  const customers = trpc.customer.search.useQuery({ q: "", limit: 100 });
   const create = trpc.outbound.create.useMutation({
     onSuccess: (order) => {
       utils.outbound.list.invalidate();
@@ -28,6 +29,7 @@ export default function NewOutboundPage() {
   const [warehouseId, setWarehouseId] = useState<string>("");
   const [reference, setReference] = useState("");
   const [customer, setCustomer] = useState("");
+  const [customerId, setCustomerId] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
 
   return (
@@ -39,7 +41,13 @@ export default function NewOutboundPage() {
           style={{ display: "flex", flexDirection: "column", gap: 18 }}
           onSubmit={(e) => {
             e.preventDefault();
-            create.mutate({ warehouseId, reference, customer: customer || undefined, lines });
+            create.mutate({
+              warehouseId,
+              reference,
+              customer: customer || undefined,
+              customerId: customerId || undefined,
+              lines,
+            });
           }}
         >
           <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
@@ -65,12 +73,26 @@ export default function NewOutboundPage() {
                 required
               />
             </Field>
-            <Field label="Customer">
+            <Field label="Consignee (prints on BOL)">
               <TextField
                 t={t}
                 value={customer}
                 onChange={(e) => setCustomer(e.target.value)}
+                placeholder="Who the load ships to"
               />
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+            <Field label="Link customer (3PL client)">
+              <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                <option value="">— none —</option>
+                {customers.data?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </div>
 

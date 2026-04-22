@@ -162,6 +162,80 @@ export const locations = pgTable(
 );
 
 // ──────────────────────────────────────────────────────────────────────
+// Customers & Suppliers
+// ──────────────────────────────────────────────────────────────────────
+/**
+ * 3PL customers — clients of the warehouse whose pallets we store.
+ * Distinct from the free-text `customer` field on outbound_orders,
+ * which stays around as a consignee/recipient label (e.g. "Main St
+ * Grocery, Tacoma") that prints on the BOL. The record below is the
+ * client account that owns the pallets and receives invoices.
+ */
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    contactName: text("contact_name"),
+    email: text("email"),
+    phone: text("phone"),
+    taxId: text("tax_id"),
+    billingLine1: text("billing_line1"),
+    billingLine2: text("billing_line2"),
+    billingCity: text("billing_city"),
+    billingRegion: text("billing_region"),
+    billingPostalCode: text("billing_postal_code"),
+    billingCountry: text("billing_country"),
+    shippingLine1: text("shipping_line1"),
+    shippingLine2: text("shipping_line2"),
+    shippingCity: text("shipping_city"),
+    shippingRegion: text("shipping_region"),
+    shippingPostalCode: text("shipping_postal_code"),
+    shippingCountry: text("shipping_country"),
+    notes: text("notes"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orgNameIdx: index("customers_org_name_idx").on(t.organizationId, t.name),
+  }),
+);
+
+/**
+ * Suppliers — upstream vendors shipping inbound orders to us. One row
+ * per distinct vendor. The `supplier` text field on inbound_orders is
+ * preserved for backward compatibility / ad-hoc labels.
+ */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    contactName: text("contact_name"),
+    email: text("email"),
+    phone: text("phone"),
+    addressLine1: text("address_line1"),
+    addressLine2: text("address_line2"),
+    city: text("city"),
+    region: text("region"),
+    postalCode: text("postal_code"),
+    country: text("country"),
+    notes: text("notes"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orgNameIdx: index("suppliers_org_name_idx").on(t.organizationId, t.name),
+  }),
+);
+
+// ──────────────────────────────────────────────────────────────────────
 // Products & Pallets
 // ──────────────────────────────────────────────────────────────────────
 export const products = pgTable(
@@ -201,6 +275,9 @@ export const pallets = pgTable(
     warehouseId: uuid("warehouse_id")
       .notNull()
       .references(() => warehouses.id, { onDelete: "cascade" }),
+    // Client account this pallet is stored on behalf of (nullable so
+    // legacy pallets and system-owned stock don't need a customer).
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
     lpn: text("lpn").notNull(), // license plate number
     status: palletStatus("status").notNull().default("in_transit"),
     currentLocationId: uuid("current_location_id").references(() => locations.id, { onDelete: "set null" }),
@@ -252,6 +329,8 @@ export const inboundOrders = pgTable(
       .references(() => warehouses.id),
     reference: text("reference").notNull(), // PO/ASN number
     supplier: text("supplier"),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
     status: inboundStatus("status").notNull().default("draft"),
     expectedAt: timestamp("expected_at", { withTimezone: true }),
     receivedAt: timestamp("received_at", { withTimezone: true }),
@@ -296,6 +375,10 @@ export const outboundOrders = pgTable(
       .references(() => warehouses.id),
     reference: text("reference").notNull(),
     customer: text("customer"),
+    // FK to the warehouse client whose pallets are being shipped.
+    // The free-text `customer` column stays for consignee display
+    // on BOLs and older orders.
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
     status: outboundStatus("status").notNull().default("draft"),
     shipBy: timestamp("ship_by", { withTimezone: true }),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),

@@ -13,6 +13,8 @@ import { reportRouter } from "./router/report";
 import { cycleCountRouter } from "./router/cycleCount";
 import { taskRouter } from "./router/task";
 import { devRouter } from "./router/dev";
+import { customerRouter } from "./router/customer";
+import { supplierRouter } from "./router/supplier";
 
 export const appRouter = router({
   organization: organizationRouter,
@@ -29,6 +31,8 @@ export const appRouter = router({
   cycleCount: cycleCountRouter,
   task: taskRouter,
   dev: devRouter,
+  customer: customerRouter,
+  supplier: supplierRouter,
 });
 
 export type AppRouter = typeof appRouter;
