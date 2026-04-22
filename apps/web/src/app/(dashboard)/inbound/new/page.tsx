@@ -8,6 +8,7 @@ import { Btn, Card, PageTitle, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { HelpText } from "~/components/address-fields";
 import { NewCustomerModal } from "~/components/new-customer-modal";
+import { NewProductModal } from "~/components/new-product-modal";
 
 interface Line {
   productId: string;
@@ -36,6 +37,7 @@ export default function NewInboundPage() {
   const [lines, setLines] = useState<Line[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [newProductRow, setNewProductRow] = useState<number | null>(null);
 
   const locations = trpc.location.listByWarehouse.useQuery(
     { warehouseId },
@@ -49,8 +51,23 @@ export default function NewInboundPage() {
 
   function addLine() {
     const firstProductId = products.data?.[0]?.id;
-    if (!firstProductId) return;
+    if (!firstProductId) {
+      // No catalog yet — jump straight to creating a product, then
+      // append a line for it on success.
+      setNewProductRow(-1);
+      return;
+    }
     setLines((prev) => [...prev, { productId: firstProductId, qtyExpected: 1 }]);
+  }
+  function onProductCreated(id: string) {
+    if (newProductRow === null) return;
+    if (newProductRow === -1) {
+      setLines((prev) => [...prev, { productId: id, qtyExpected: 1 }]);
+    } else {
+      const row = newProductRow;
+      setLines((prev) => prev.map((l, j) => (j === row ? { ...l, productId: id } : l)));
+    }
+    setNewProductRow(null);
   }
   function updateLine(i: number, patch: Partial<Line>) {
     setLines(lines.map((l, j) => (i === j ? { ...l, ...patch } : l)));
@@ -82,13 +99,23 @@ export default function NewInboundPage() {
               borderRadius: 10,
               marginBottom: 14,
               fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            No products in your catalog yet. Add one at{" "}
-            <a href="/products" style={{ color: t.primaryDeep, fontWeight: 600 }}>
-              /products
-            </a>{" "}
-            before creating an inbound — you can&apos;t save an order without at least one item.
+            <span>No products in your catalog yet. Add one now to keep going.</span>
+            <Btn
+              t={t}
+              type="button"
+              variant="secondary"
+              size="sm"
+              icon={Ic.Plus}
+              onClick={() => setNewProductRow(-1)}
+            >
+              New product
+            </Btn>
           </div>
         )}
 
@@ -246,15 +273,14 @@ export default function NewInboundPage() {
               <button
                 type="button"
                 onClick={addLine}
-                disabled={noProducts}
                 style={{
                   width: "100%",
                   padding: "28px 16px",
                   borderRadius: 14,
-                  background: noProducts ? t.surfaceAlt : t.primarySoft,
-                  border: `2px dashed ${noProducts ? t.border : t.primaryDeep}`,
-                  cursor: noProducts ? "not-allowed" : "pointer",
-                  color: noProducts ? t.muted : t.primaryDeep,
+                  background: t.primarySoft,
+                  border: `2px dashed ${t.primaryDeep}`,
+                  cursor: "pointer",
+                  color: t.primaryDeep,
                   fontFamily: FONTS.sans,
                   fontSize: 14,
                   fontWeight: 600,
@@ -269,8 +295,8 @@ export default function NewInboundPage() {
                     width: 36,
                     height: 36,
                     borderRadius: 999,
-                    background: noProducts ? t.surface : t.primary,
-                    color: noProducts ? t.muted : t.primaryText,
+                    background: t.primary,
+                    color: t.primaryText,
                     display: "grid",
                     placeItems: "center",
                     fontSize: 20,
@@ -282,7 +308,7 @@ export default function NewInboundPage() {
                 <div>Add an item to this shipment</div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
                   {noProducts
-                    ? "Add a product to your catalog first"
+                    ? "We'll help you add a product along the way"
                     : "Click to pick a product and set the expected quantity"}
                 </div>
               </button>
@@ -321,16 +347,39 @@ export default function NewInboundPage() {
                     <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
                       {i + 1}
                     </span>
-                    <Select
-                      value={l.productId}
-                      onChange={(e) => updateLine(i, { productId: e.target.value })}
-                    >
-                      {products.data?.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.sku ? `${p.sku} — ${p.name}` : p.name}
-                        </option>
-                      ))}
-                    </Select>
+                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                      <Select
+                        value={l.productId}
+                        onChange={(e) => updateLine(i, { productId: e.target.value })}
+                        style={{ flex: 1, minWidth: 0 }}
+                      >
+                        {products.data?.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.sku ? `${p.sku} — ${p.name}` : p.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => setNewProductRow(i)}
+                        title="Add a new product"
+                        aria-label="Add a new product"
+                        style={{
+                          width: 34,
+                          minWidth: 34,
+                          borderRadius: 10,
+                          background: t.surfaceAlt,
+                          border: `1.5px solid ${t.border}`,
+                          color: t.primaryDeep,
+                          cursor: "pointer",
+                          fontSize: 16,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
                     <TextField
                       t={t}
                       type="number"
@@ -361,7 +410,6 @@ export default function NewInboundPage() {
                 <button
                   type="button"
                   onClick={addLine}
-                  disabled={noProducts}
                   style={{
                     width: "100%",
                     padding: "10px 16px",
@@ -374,7 +422,7 @@ export default function NewInboundPage() {
                     fontFamily: FONTS.sans,
                     fontSize: 13,
                     fontWeight: 600,
-                    cursor: noProducts ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                     textAlign: "left",
                   }}
                 >
@@ -422,6 +470,12 @@ export default function NewInboundPage() {
         open={newCustomerOpen}
         onClose={() => setNewCustomerOpen(false)}
         onCreated={(id) => setCustomerId(id)}
+      />
+
+      <NewProductModal
+        open={newProductRow !== null}
+        onClose={() => setNewProductRow(null)}
+        onCreated={onProductCreated}
       />
     </div>
   );
