@@ -1,8 +1,18 @@
 import { z } from "zod";
 import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+
+/**
+ * Turn Postgres unique-violation errors (23505) into a readable tRPC
+ * error. We raise this from product.create when a duplicate SKU would
+ * otherwise surface as a raw "duplicate key value violates..." message.
+ */
+function isUniqueViolation(e: unknown): e is { code: string; constraint_name?: string } {
+  return typeof e === "object" && e !== null && "code" in e && (e as { code: unknown }).code === "23505";
+}
 
 export const productRouter = router({
   search: tenantProcedure
@@ -82,19 +92,31 @@ export const productRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      const [row] = await ctx.db
-        .insert(schema.products)
-        .values({
-          organizationId: orgId,
-          sku: input.sku,
-          name: input.name,
-          barcode: input.barcode,
-          weightKg: input.weightKg?.toString(),
-          velocityClass: input.velocityClass,
-          unitPriceCents: input.unitPriceCents,
-        })
-        .returning();
-      return row;
+      try {
+        const [row] = await ctx.db
+          .insert(schema.products)
+          .values({
+            organizationId: orgId,
+            sku: input.sku,
+            name: input.name,
+            barcode: input.barcode,
+            weightKg: input.weightKg?.toString(),
+            velocityClass: input.velocityClass,
+            unitPriceCents: input.unitPriceCents,
+          })
+          .returning();
+        return row;
+      } catch (e) {
+        if (isUniqueViolation(e)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: input.sku
+              ? `A product with SKU "${input.sku}" already exists. Pick a different SKU or leave it blank.`
+              : "A product with these details already exists.",
+          });
+        }
+        throw e;
+      }
     }),
 
   /**

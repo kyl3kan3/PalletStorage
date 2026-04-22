@@ -30,16 +30,25 @@ export function NewCustomerModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.customer.create.useMutation({
-    onSuccess: async (row) => {
-      // Await refetch so the parent dropdown re-renders with the
-      // new option BEFORE we auto-select it and close.
-      await Promise.all([
-        utils.customer.list.invalidate(),
-        utils.customer.search.invalidate(),
-      ]);
-      if (row) onCreated(row.id);
+    onSuccess: (row) => {
+      if (!row) {
+        // Server said 'ok' but returned nothing — treat as failure so
+        // the user isn't left wondering why the modal closed silently.
+        console.error("[NewCustomerModal] create returned no row");
+        return;
+      }
+      onCreated(row.id);
       reset();
       onClose();
+      // Fire-and-forget — the parent dropdown refetches once these
+      // settle. Don't await so the modal closes instantly on success.
+      utils.customer.list.invalidate();
+      utils.customer.search.invalidate();
+    },
+    onError: (error) => {
+      // Surface in console for debugging; the inline error below also
+      // renders the message text.
+      console.error("[NewCustomerModal] create failed:", error);
     },
   });
 
@@ -137,7 +146,18 @@ export function NewCustomerModal({
           </Btn>
         </div>
         {create.error && (
-          <div style={{ fontSize: 12, color: t.coral }}>{create.error.message}</div>
+          <div
+            style={{
+              background: t.coralSoft,
+              color: t.coral,
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            {create.error.message}
+          </div>
         )}
       </form>
     </Modal>

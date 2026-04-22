@@ -30,11 +30,18 @@ export function NewProductModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.product.create.useMutation({
-    onSuccess: async (row) => {
-      await utils.product.search.invalidate();
-      if (row) onCreated(row.id);
+    onSuccess: (row) => {
+      if (!row) {
+        console.error("[NewProductModal] create returned no row");
+        return;
+      }
+      onCreated(row.id);
       reset();
       onClose();
+      utils.product.search.invalidate();
+    },
+    onError: (error) => {
+      console.error("[NewProductModal] create failed:", error);
     },
   });
 
@@ -109,7 +116,18 @@ export function NewProductModal({
           </Btn>
         </div>
         {create.error && (
-          <div style={{ fontSize: 12, color: t.coral }}>{create.error.message}</div>
+          <div
+            style={{
+              background: t.coralSoft,
+              color: t.coral,
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            {create.error.message}
+          </div>
         )}
       </form>
     </Modal>
