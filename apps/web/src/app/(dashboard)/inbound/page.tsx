@@ -7,6 +7,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tabs, Tag, type TabItem } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { inboundStatusTone } from "~/lib/statusTone";
+import { friendlyInboundStatus } from "~/lib/friendly";
 
 export default function InboundListPage() {
   const t = theme;
@@ -101,7 +102,7 @@ export default function InboundListPage() {
             <span>{o.supplier ?? "—"}</span>
             <span>
               <Tag t={t} tone={inboundStatusTone(o.status)}>
-                {o.status}
+                {friendlyInboundStatus(o.status)}
               </Tag>
             </span>
             <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>

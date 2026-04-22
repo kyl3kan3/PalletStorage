@@ -73,7 +73,7 @@ export default function NewOutboundPage() {
                 required
               />
             </Field>
-            <Field label="Consignee (prints on BOL)">
+            <Field label="Ship to (prints on shipping label)">
               <TextField
                 t={t}
                 value={customer}

@@ -80,7 +80,7 @@ export default function ProductsPage() {
       <PageTitle
         eyebrow="Catalog"
         title="Products"
-        subtitle="SKUs, barcodes, and velocity classes."
+        subtitle="Your item catalog. SKU (item code) is optional; velocity class A/B/C marks fast/medium/slow movers."
         right={
           <label style={{ display: "inline-flex", cursor: "pointer" }}>
             <span>

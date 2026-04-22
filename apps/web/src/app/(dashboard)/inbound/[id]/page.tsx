@@ -6,6 +6,8 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { inboundStatusTone } from "~/lib/statusTone";
+import { friendlyInboundStatus, nextInboundStep } from "~/lib/friendly";
+import { NextStepCard } from "~/components/next-step-card";
 
 export default function InboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -115,7 +117,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         right={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Tag t={t} tone={inboundStatusTone(status)}>
-              {status}
+              {friendlyInboundStatus(status)}
             </Tag>
             {canEdit && !editing && (
               <Btn t={t} variant="secondary" size="sm" icon={Ic.Settings} onClick={beginEdit}>
@@ -149,12 +151,56 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         }
       />
 
+      {/* Next-step card — only when not editing and when there's actually
+          something to do. Gives someone with basic warehouse training a
+          clear action label instead of staring at five buttons. */}
+      {!editing && order && (() => {
+        const step = nextInboundStep(status, hasShort);
+        if (!step) return null;
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <NextStepCard step={step}>
+              {(status === "receiving" || status === "open") && (
+                <>
+                  <Btn
+                    t={t}
+                    variant="accent"
+                    size="md"
+                    icon={Ic.Check}
+                    disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
+                    onClick={() =>
+                      closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
+                    }
+                  >
+                    {closeOrder.isPending ? "Closing…" : step.label}
+                  </Btn>
+                  {hasShort && (
+                    <TextField
+                      t={t}
+                      placeholder="Short-close reason (required)"
+                      value={closeReason}
+                      onChange={(e) => setCloseReason(e.target.value)}
+                      style={{ minWidth: 260, flex: 1 }}
+                    />
+                  )}
+                  {closeOrder.error && (
+                    <span style={{ fontSize: 12, color: t.coral }}>
+                      {closeOrder.error.message}
+                    </span>
+                  )}
+                </>
+              )}
+            </NextStepCard>
+          </div>
+        );
+      })()}
+
       {/* Header card */}
       <Card t={t}>
         {editing ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              <EditField label="Reference / PO">
+              <EditField label="Order number">
                 <TextField
                   t={t}
                   value={draft.reference}

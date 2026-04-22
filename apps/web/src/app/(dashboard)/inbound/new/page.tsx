@@ -71,7 +71,11 @@ export default function NewInboundPage() {
 
   return (
     <div>
-      <PageTitle eyebrow="Create an ASN" title="New inbound" />
+      <PageTitle
+        eyebrow="Expected shipment"
+        title="New inbound"
+        subtitle="Pre-register a shipment so your team can check it in on arrival."
+      />
 
       <Card t={t}>
         {(products.data?.length ?? 0) === 0 && (
@@ -125,11 +129,12 @@ export default function NewInboundPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Reference / PO">
+            <Field label="Order number">
               <TextField
                 t={t}
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
+                placeholder="PO or reference from the supplier"
                 required
               />
             </Field>

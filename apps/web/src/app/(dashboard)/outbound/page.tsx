@@ -7,6 +7,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tabs, Tag, type TabItem } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { outboundStatusTone } from "~/lib/statusTone";
+import { friendlyOutboundStatus } from "~/lib/friendly";
 
 export default function OutboundListPage() {
   const t = theme;
@@ -107,7 +108,7 @@ export default function OutboundListPage() {
             <span>{o.customer ?? "—"}</span>
             <span>
               <Tag t={t} tone={outboundStatusTone(o.status)}>
-                {o.status}
+                {friendlyOutboundStatus(o.status)}
               </Tag>
             </span>
             <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>

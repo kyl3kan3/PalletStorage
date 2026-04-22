@@ -6,6 +6,8 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { outboundStatusTone } from "~/lib/statusTone";
+import { friendlyOutboundStatus, nextOutboundStep } from "~/lib/friendly";
+import { NextStepCard } from "~/components/next-step-card";
 
 export default function OutboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -40,6 +42,8 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
   const status = order?.status ?? "…";
   const isTerminal = status === "shipped" || status === "cancelled";
   const canCancel = status === "draft" || status === "open" || status === "picking";
+  const allLinesPicked =
+    lines.length > 0 && lines.every((l) => l.qtyPicked >= l.qtyOrdered);
 
   return (
     <div>
@@ -48,10 +52,82 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
         title={`Outbound ${id.slice(0, 8)}`}
         right={
           <Tag t={t} tone={outboundStatusTone(status)}>
-            {status}
+            {friendlyOutboundStatus(status)}
           </Tag>
         }
       />
+
+      {/* Next step card — surfaces the single primary action for the
+          current status so a basic user doesn't have to scan a row of
+          five buttons. Secondary actions stay available below. */}
+      {order && !isTerminal && (() => {
+        const step = nextOutboundStep(status, allLinesPicked);
+        if (!step) return null;
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <NextStepCard step={step}>
+              {status === "open" || status === "draft" ? (
+                <Btn
+                  t={t}
+                  variant="accent"
+                  size="md"
+                  icon={Ic.Spark}
+                  onClick={() => genPicks.mutate({ outboundOrderId: id })}
+                  disabled={genPicks.isPending}
+                >
+                  {genPicks.isPending ? "Generating…" : "Generate picks"}
+                </Btn>
+              ) : null}
+              {status === "picking" && allLinesPicked ? (
+                <Btn
+                  t={t}
+                  variant="accent"
+                  size="md"
+                  icon={Ic.Package}
+                  disabled={pack.isPending}
+                  onClick={() => pack.mutate({ id })}
+                >
+                  {pack.isPending ? "Marking packed…" : "Mark packed"}
+                </Btn>
+              ) : null}
+              {status === "packed" ? (
+                <>
+                  <TextField
+                    t={t}
+                    placeholder="Carrier"
+                    value={carrier}
+                    onChange={(e) => setCarrier(e.target.value)}
+                    style={{ minWidth: 160 }}
+                  />
+                  <TextField
+                    t={t}
+                    placeholder="Tracking #"
+                    value={tracking}
+                    onChange={(e) => setTracking(e.target.value)}
+                    style={{ minWidth: 180 }}
+                  />
+                  <Btn
+                    t={t}
+                    variant="accent"
+                    size="md"
+                    icon={Ic.Truck}
+                    disabled={ship.isPending}
+                    onClick={() =>
+                      ship.mutate({
+                        id,
+                        carrier: carrier.trim() || undefined,
+                        trackingNumber: tracking.trim() || undefined,
+                      })
+                    }
+                  >
+                    {ship.isPending ? "Shipping…" : "Confirm ship"}
+                  </Btn>
+                </>
+              ) : null}
+            </NextStepCard>
+          </div>
+        );
+      })()}
 
       <Card t={t} padding={0}>
         <div
@@ -115,79 +191,24 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
         )}
       </Card>
 
-      {!isTerminal && (
-        <div style={{ marginTop: 16 }}>
-          <Card t={t}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-              <Btn
-                t={t}
-                variant="primary"
-                size="md"
-                icon={Ic.Spark}
-                onClick={() => genPicks.mutate({ outboundOrderId: id })}
-                disabled={genPicks.isPending || (status !== "open" && status !== "draft")}
-              >
-                {genPicks.isPending ? "Generating…" : "Generate picks"}
-              </Btn>
-              {genPicks.data && (
-                <Tag t={t} tone="mint">
-                  Created {genPicks.data.created} pick(s)
-                </Tag>
-              )}
-              <Btn
-                t={t}
-                variant="secondary"
-                size="md"
-                icon={Ic.Package}
-                disabled={pack.isPending || status !== "picking"}
-                onClick={() => pack.mutate({ id })}
-              >
-                {pack.isPending ? "Packing…" : "Mark packed"}
-              </Btn>
-              {pack.error && <span style={{ fontSize: 12, color: t.coral }}>{pack.error.message}</span>}
-            </div>
-          </Card>
+      {/* Confirmation toasts that used to live on the old action cards.
+          Kept as inline notices because the buttons themselves now live
+          in the Next-step card at the top. */}
+      {genPicks.data && (
+        <div style={{ marginTop: 12 }}>
+          <Tag t={t} tone="mint">
+            Created {genPicks.data.created} pick(s)
+          </Tag>
         </div>
       )}
-
-      {status === "packed" && (
-        <div style={{ marginTop: 16 }}>
-          <Card t={t} tint="primary">
-            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 10 }}>Ready to ship</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              <TextField
-                t={t}
-                placeholder="Carrier"
-                value={carrier}
-                onChange={(e) => setCarrier(e.target.value)}
-              />
-              <TextField
-                t={t}
-                placeholder="Tracking number"
-                value={tracking}
-                onChange={(e) => setTracking(e.target.value)}
-              />
-              <Btn
-                t={t}
-                variant="accent"
-                size="md"
-                icon={Ic.Truck}
-                disabled={ship.isPending}
-                onClick={() =>
-                  ship.mutate({
-                    id,
-                    carrier: carrier.trim() || undefined,
-                    trackingNumber: tracking.trim() || undefined,
-                  })
-                }
-              >
-                {ship.isPending ? "Shipping…" : "Confirm ship"}
-              </Btn>
-            </div>
-            {ship.error && (
-              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>{ship.error.message}</div>
-            )}
-          </Card>
+      {ship.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+          {ship.error.message}
+        </div>
+      )}
+      {pack.error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+          {pack.error.message}
         </div>
       )}
 
@@ -254,11 +275,11 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                 borderTop: `1.5px dashed ${t.border}`,
               }}
             >
-              <div>BOL</div>
+              <div>Shipping #</div>
               <div>Carrier</div>
               <div>Tracking</div>
               <div>Shipped</div>
-              <div>BOL PDF</div>
+              <div>Print</div>
             </div>
             {shipmentsQ.data.map((s) => (
               <div

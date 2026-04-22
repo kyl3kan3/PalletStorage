@@ -6,6 +6,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { cycleCountStatusTone } from "~/lib/statusTone";
+import { friendlyCountStatus } from "~/lib/friendly";
 
 /**
  * Variance review page. Shows every line in the count with its expected
@@ -50,7 +51,7 @@ export default function CycleCountDetailPage({
         title={`Count ${id.slice(0, 8)}`}
         right={
           <Tag t={t} tone={cycleCountStatusTone(status)}>
-            {status}
+            {friendlyCountStatus(status)}
           </Tag>
         }
       />
