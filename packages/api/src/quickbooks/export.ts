@@ -31,17 +31,21 @@ async function ensureItems(
     .where(and(eq(schema.products.organizationId, orgId), inArray(schema.products.id, missing)));
 
   for (const p of products) {
-    // Try to find an existing Item by SKU (stored as QBO Item Name).
+    // QBO Items key on Name, which we normally map to our SKU. When a
+    // product has no SKU (now allowed since 0009), fall back to the
+    // product's display name as the Item Name. Collisions on name are
+    // the operator's problem to resolve inside QBO.
+    const qboItemName = (p.sku && p.sku.trim()) || p.name;
     const existing = await qboFetch<{ QueryResponse: { Item?: { Id: string }[] } }>(
       conn,
-      `/query?query=${encodeURIComponent(`select * from Item where Name = '${escapeQboLiteral(p.sku)}'`)}`,
+      `/query?query=${encodeURIComponent(`select * from Item where Name = '${escapeQboLiteral(qboItemName)}'`)}`,
     );
     let qboId = existing.QueryResponse.Item?.[0]?.Id;
     if (!qboId) {
       const created = await qboFetch<{ Item: { Id: string } }>(conn, "/item", {
         method: "POST",
         body: {
-          Name: p.sku,
+          Name: qboItemName,
           Description: p.name,
           Type: "Inventory",
           TrackQtyOnHand: true,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, TextField } from "~/components/kit";
@@ -22,9 +22,6 @@ export default function NewInboundPage() {
   const customers = trpc.customer.search.useQuery({ q: "", limit: 100 });
   const create = trpc.inbound.create.useMutation({
     onSuccess: (order) => {
-      // Invalidate the list so "/inbound" reflects the new order the
-      // next time it's visited (React Query's cache would otherwise
-      // keep serving stale rows until the page remounts or refocuses).
       utils.inbound.list.invalidate();
       router.push(`/inbound/${order!.id}`);
     },
@@ -35,31 +32,80 @@ export default function NewInboundPage() {
   const [supplier, setSupplier] = useState("");
   const [supplierId, setSupplierId] = useState<string>("");
   const [customerId, setCustomerId] = useState<string>("");
+  const [receivingLocationId, setReceivingLocationId] = useState<string>("");
+  const [expectedAt, setExpectedAt] = useState<string>("");
   const [lines, setLines] = useState<Line[]>([]);
 
+  // Dock + staging locations in the selected warehouse — the candidates
+  // for receiving. Fetched only once a warehouse is picked.
+  const locations = trpc.location.listByWarehouse.useQuery(
+    { warehouseId },
+    { enabled: warehouseId.length > 0 },
+  );
+  const receivingCandidates = useMemo(
+    () =>
+      (locations.data ?? []).filter(
+        (l) => l.type === "dock" || l.type === "staging",
+      ),
+    [locations.data],
+  );
+
   function addLine() {
-    setLines([...lines, { productId: products.data?.[0]?.id ?? "", qtyExpected: 1 }]);
+    const firstProductId = products.data?.[0]?.id;
+    if (!firstProductId) return; // guarded by the banner below
+    setLines((prev) => [...prev, { productId: firstProductId, qtyExpected: 1 }]);
   }
   function updateLine(i: number, patch: Partial<Line>) {
     setLines(lines.map((l, j) => (i === j ? { ...l, ...patch } : l)));
   }
+  function removeLine(i: number) {
+    setLines(lines.filter((_, j) => j !== i));
+  }
+
+  // Catches the silent-save failure: the server rejects lines with
+  // empty productId (fails UUID validation) and used to return a 400
+  // that the form didn't display.
+  const invalidLines = lines.some((l) => !l.productId);
+  const canSubmit =
+    !create.isPending && !!warehouseId && !!reference.trim() && lines.length > 0 && !invalidLines;
 
   return (
     <div>
       <PageTitle eyebrow="Create an ASN" title="New inbound" />
 
       <Card t={t}>
+        {(products.data?.length ?? 0) === 0 && (
+          <div
+            style={{
+              background: t.coralSoft,
+              color: t.ink,
+              padding: "10px 14px",
+              borderRadius: 10,
+              marginBottom: 14,
+              fontSize: 13,
+            }}
+          >
+            No products in your catalog yet. Add one at{" "}
+            <a href="/products" style={{ color: t.primaryDeep, fontWeight: 600 }}>
+              /products
+            </a>{" "}
+            before creating an inbound — you can't save an order without at least one line.
+          </div>
+        )}
+
         <form
           style={{ display: "flex", flexDirection: "column", gap: 18 }}
           onSubmit={(e) => {
             e.preventDefault();
-            if (!warehouseId || lines.length === 0) return;
+            if (!canSubmit) return;
             create.mutate({
               warehouseId,
               reference,
               supplier: supplier || undefined,
               supplierId: supplierId || undefined,
               customerId: customerId || undefined,
+              receivingLocationId: receivingLocationId || undefined,
+              expectedAt: expectedAt ? new Date(expectedAt) : undefined,
               lines,
             });
           }}
@@ -87,17 +133,31 @@ export default function NewInboundPage() {
                 required
               />
             </Field>
-            <Field label="Supplier (free text)">
+            <Field label="Expected on">
               <TextField
                 t={t}
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Legacy label; optional"
+                type="date"
+                value={expectedAt}
+                onChange={(e) => setExpectedAt(e.target.value)}
               />
             </Field>
           </div>
 
-          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+            <Field label="Receiving location">
+              <Select
+                value={receivingLocationId}
+                onChange={(e) => setReceivingLocationId(e.target.value)}
+                disabled={!warehouseId}
+              >
+                <option value="">— none —</option>
+                {receivingCandidates.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code} ({l.type})
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Link supplier">
               <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                 <option value="">— none —</option>
@@ -120,10 +180,27 @@ export default function NewInboundPage() {
             </Field>
           </div>
 
+          <Field label="Supplier (free text; prints on receipt)">
+            <TextField
+              t={t}
+              value={supplier}
+              onChange={(e) => setSupplier(e.target.value)}
+              placeholder="Optional — only used if you didn't link a supplier above"
+            />
+          </Field>
+
           <div>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
               <div style={{ flex: 1, fontWeight: 600, color: t.ink }}>Lines</div>
-              <Btn t={t} variant="secondary" size="sm" icon={Ic.Plus} type="button" onClick={addLine}>
+              <Btn
+                t={t}
+                variant="secondary"
+                size="sm"
+                icon={Ic.Plus}
+                type="button"
+                onClick={addLine}
+                disabled={(products.data?.length ?? 0) === 0}
+              >
                 Add line
               </Btn>
             </div>
@@ -149,7 +226,7 @@ export default function NewInboundPage() {
                 key={i}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 120px",
+                  gridTemplateColumns: "1fr 120px 32px",
                   gap: 10,
                   padding: "10px 0",
                   borderTop: i === 0 ? "none" : `1.5px dashed ${t.border}`,
@@ -162,7 +239,7 @@ export default function NewInboundPage() {
                 >
                   {products.data?.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.sku} — {p.name}
+                      {p.sku ? `${p.sku} — ${p.name}` : p.name}
                     </option>
                   ))}
                 </Select>
@@ -171,9 +248,27 @@ export default function NewInboundPage() {
                   type="number"
                   min={1}
                   value={l.qtyExpected}
-                  onChange={(e) => updateLine(i, { qtyExpected: Number(e.target.value) })}
+                  onChange={(e) =>
+                    updateLine(i, { qtyExpected: Number(e.target.value) })
+                  }
                   style={{ width: 120 }}
                 />
+                <button
+                  type="button"
+                  onClick={() => removeLine(i)}
+                  aria-label="Remove line"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "transparent",
+                    border: `1.5px solid ${t.border}`,
+                    color: t.muted,
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
@@ -185,10 +280,29 @@ export default function NewInboundPage() {
               size="md"
               icon={Ic.Check}
               type="submit"
-              disabled={create.isPending || lines.length === 0}
+              disabled={!canSubmit}
             >
               {create.isPending ? "Creating…" : "Create inbound"}
             </Btn>
+            {create.error && (
+              <div
+                style={{
+                  marginTop: 10,
+                  color: t.coral,
+                  fontSize: 13,
+                  background: t.coralSoft,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                }}
+              >
+                {create.error.message}
+              </div>
+            )}
+            {invalidLines && (
+              <div style={{ marginTop: 8, color: t.coral, fontSize: 12 }}>
+                One or more lines is missing a product. Pick a product on every line before saving.
+              </div>
+            )}
           </div>
         </form>
       </Card>

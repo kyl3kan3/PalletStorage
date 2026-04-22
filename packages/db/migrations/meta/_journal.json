@@ -64,6 +64,13 @@
       "when": 1776703319875,
       "tag": "0008_customers_suppliers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776703319876,
+      "tag": "0009_optional_sku_and_receiving_loc",
+      "breakpoints": true
     }
   ]
 }

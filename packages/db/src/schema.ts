@@ -245,7 +245,7 @@ export const products = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    sku: text("sku").notNull(),
+    sku: text("sku"),
     name: text("name").notNull(),
     barcode: text("barcode"),
     lengthMm: integer("length_mm"),
@@ -331,6 +331,12 @@ export const inboundOrders = pgTable(
     supplier: text("supplier"),
     supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
     customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    // Where the shipment will land — a dock door or staging location.
+    // Pallets default their `currentLocationId` to this on receive if
+    // the receiver doesn't scan a different bin.
+    receivingLocationId: uuid("receiving_location_id").references(() => locations.id, {
+      onDelete: "set null",
+    }),
     status: inboundStatus("status").notNull().default("draft"),
     expectedAt: timestamp("expected_at", { withTimezone: true }),
     receivedAt: timestamp("received_at", { withTimezone: true }),

@@ -30,7 +30,7 @@ export const productRouter = router({
         products: z
           .array(
             z.object({
-              sku: z.string().min(1),
+              sku: z.string().min(1).optional(),
               name: z.string().min(1),
               barcode: z.string().optional(),
               weightKg: z.number().positive().optional(),
@@ -72,7 +72,7 @@ export const productRouter = router({
   create: tenantProcedure
     .input(
       z.object({
-        sku: z.string().min(1),
+        sku: z.string().min(1).optional(),
         name: z.string().min(1),
         barcode: z.string().optional(),
         weightKg: z.number().positive().optional(),

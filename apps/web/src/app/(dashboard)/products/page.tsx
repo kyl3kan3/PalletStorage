@@ -37,12 +37,12 @@ export default function ProductsPage() {
       weight: cols.indexOf("weight_kg"),
       velocity: cols.indexOf("velocity_class"),
     };
-    if (idx.sku < 0 || idx.name < 0) {
-      alert("CSV must have at least `sku` and `name` columns");
+    if (idx.name < 0) {
+      alert("CSV must have at least a `name` column (`sku` is optional)");
       return;
     }
     type Row = {
-      sku: string;
+      sku?: string;
       name: string;
       barcode?: string;
       weightKg?: number;
@@ -51,15 +51,15 @@ export default function ProductsPage() {
     const products: Row[] = rows
       .map((row): Row | null => {
         const cells = row.split(",").map((c) => c.trim());
-        const sku = cells[idx.sku] ?? "";
+        const skuCell = idx.sku >= 0 ? cells[idx.sku] ?? "" : "";
         const name = cells[idx.name] ?? "";
-        if (!sku || !name) return null;
+        if (!name) return null; // name is the only required field now
         const velocityRaw = idx.velocity >= 0 ? cells[idx.velocity] : undefined;
         const weight = idx.weight >= 0 ? Number(cells[idx.weight]) : undefined;
         const velocity =
           velocityRaw === "A" || velocityRaw === "B" || velocityRaw === "C" ? velocityRaw : undefined;
         return {
-          sku,
+          sku: skuCell || undefined,
           name,
           barcode: idx.barcode >= 0 ? cells[idx.barcode] || undefined : undefined,
           weightKg: Number.isFinite(weight) ? (weight as number) : undefined,
@@ -103,19 +103,18 @@ export default function ProductsPage() {
           style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}
           onSubmit={(e) => {
             e.preventDefault();
-            create.mutate({ sku, name, barcode: barcode || undefined });
+            create.mutate({ sku: sku.trim() || undefined, name, barcode: barcode || undefined });
             setSku("");
             setName("");
             setBarcode("");
           }}
         >
-          <Field label="SKU">
+          <Field label="SKU (optional)">
             <TextField
               t={t}
               value={sku}
               onChange={(e) => setSku(e.target.value)}
-              placeholder="SKU-00001"
-              required
+              placeholder="e.g. SKU-00001 — leave blank if unknown"
             />
           </Field>
           <Field label="Name">
@@ -201,7 +200,7 @@ function ProductRow({
 }: {
   product: {
     id: string;
-    sku: string;
+    sku: string | null;
     name: string;
     barcode: string | null;
     weightKg: string | null;
@@ -239,7 +238,9 @@ function ProductRow({
         color: t.body,
       }}
     >
-      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>{product.sku}</span>
+      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+        {product.sku ?? <span style={{ color: t.muted, fontWeight: 400 }}>—</span>}
+      </span>
       <span>
         {product.name}
         {product.velocityClass && (

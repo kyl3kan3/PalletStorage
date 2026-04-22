@@ -30,6 +30,7 @@ export const inboundRouter = router({
         supplier: z.string().optional(),
         supplierId: z.string().uuid().nullable().optional(),
         customerId: z.string().uuid().nullable().optional(),
+        receivingLocationId: z.string().uuid().nullable().optional(),
         expectedAt: z.date().optional(),
         lines: z
           .array(
@@ -53,6 +54,7 @@ export const inboundRouter = router({
             supplier: input.supplier,
             supplierId: input.supplierId ?? null,
             customerId: input.customerId ?? null,
+            receivingLocationId: input.receivingLocationId ?? null,
             expectedAt: input.expectedAt,
             status: "open",
           })
@@ -68,6 +70,167 @@ export const inboundRouter = router({
         );
         return order;
       });
+    }),
+
+  /**
+   * Edit the header fields on an inbound order. The reference can be
+   * changed only while the order hasn't started receiving; everything
+   * else (supplier, customer, receiving location, expected date,
+   * free-text supplier label) is safe to change any time since none
+   * of it is referenced by downstream rows.
+   */
+  updateHeader: managerProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        reference: z.string().min(1).optional(),
+        supplier: z.string().max(200).nullable().optional(),
+        supplierId: z.string().uuid().nullable().optional(),
+        customerId: z.string().uuid().nullable().optional(),
+        receivingLocationId: z.string().uuid().nullable().optional(),
+        expectedAt: z.date().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const [order] = await ctx.db
+        .select()
+        .from(schema.inboundOrders)
+        .where(
+          and(
+            eq(schema.inboundOrders.id, input.id),
+            eq(schema.inboundOrders.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+      if (order.status === "closed" || order.status === "cancelled") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Can't edit a ${order.status} order`,
+        });
+      }
+
+      // Only let the reference change before receiving starts.
+      if (input.reference !== undefined && input.reference !== order.reference) {
+        if (order.status !== "open" && order.status !== "draft") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Reference can only change before receiving begins",
+          });
+        }
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (input.reference !== undefined) patch.reference = input.reference;
+      if (input.supplier !== undefined) patch.supplier = input.supplier;
+      if (input.supplierId !== undefined) patch.supplierId = input.supplierId;
+      if (input.customerId !== undefined) patch.customerId = input.customerId;
+      if (input.receivingLocationId !== undefined) {
+        patch.receivingLocationId = input.receivingLocationId;
+      }
+      if (input.expectedAt !== undefined) patch.expectedAt = input.expectedAt;
+
+      if (Object.keys(patch).length === 0) return { ok: true };
+
+      await ctx.db
+        .update(schema.inboundOrders)
+        .set(patch)
+        .where(eq(schema.inboundOrders.id, order.id));
+      return { ok: true };
+    }),
+
+  /** Edit qtyExpected on a line. Received qty is unchanged. */
+  updateLine: managerProcedure
+    .input(
+      z.object({
+        lineId: z.string().uuid(),
+        qtyExpected: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const result = await ctx.db
+        .update(schema.inboundLines)
+        .set({ qtyExpected: input.qtyExpected })
+        .where(
+          and(
+            eq(schema.inboundLines.id, input.lineId),
+            eq(schema.inboundLines.organizationId, orgId),
+          ),
+        )
+        .returning({ id: schema.inboundLines.id });
+      if (result.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+      return { ok: true };
+    }),
+
+  /** Add a new line to an existing order. */
+  addLine: managerProcedure
+    .input(
+      z.object({
+        inboundOrderId: z.string().uuid(),
+        productId: z.string().uuid(),
+        qtyExpected: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      // Verify the order belongs to this tenant and isn't terminal.
+      const [order] = await ctx.db
+        .select({ status: schema.inboundOrders.status })
+        .from(schema.inboundOrders)
+        .where(
+          and(
+            eq(schema.inboundOrders.id, input.inboundOrderId),
+            eq(schema.inboundOrders.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND" });
+      if (order.status === "closed" || order.status === "cancelled") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Can't add to a ${order.status} order`,
+        });
+      }
+      const [row] = await ctx.db
+        .insert(schema.inboundLines)
+        .values({
+          organizationId: orgId,
+          inboundOrderId: input.inboundOrderId,
+          productId: input.productId,
+          qtyExpected: input.qtyExpected,
+        })
+        .returning();
+      return row;
+    }),
+
+  /** Remove a line. Only allowed if nothing's been received against it. */
+  removeLine: managerProcedure
+    .input(z.object({ lineId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const [line] = await ctx.db
+        .select()
+        .from(schema.inboundLines)
+        .where(
+          and(
+            eq(schema.inboundLines.id, input.lineId),
+            eq(schema.inboundLines.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!line) throw new TRPCError({ code: "NOT_FOUND" });
+      if (line.qtyReceived > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Line has received qty; can't remove without returning stock first",
+        });
+      }
+      await ctx.db
+        .delete(schema.inboundLines)
+        .where(eq(schema.inboundLines.id, input.lineId));
+      return { ok: true };
     }),
 
   /** Detail view with lines, for the web dashboard. */

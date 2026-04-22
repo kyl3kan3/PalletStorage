@@ -150,7 +150,7 @@ CREATE INDEX IF NOT EXISTS "locations_parent_idx" ON "locations" ("parent_id");
 CREATE TABLE IF NOT EXISTS "products" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
-  "sku" text NOT NULL,
+  "sku" text,
   "name" text NOT NULL,
   "barcode" text,
   "length_mm" integer,
