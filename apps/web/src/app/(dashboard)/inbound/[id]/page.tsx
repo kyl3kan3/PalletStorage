@@ -518,7 +518,17 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               style={{ textDecoration: "none" }}
             >
               <Btn t={t} variant="secondary" size="md" icon={Ic.Download}>
-                Download receipt
+                Receipt (for driver)
+              </Btn>
+            </a>
+            <a
+              href={`/api/inbound-orders/${id}/report.pdf`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ textDecoration: "none" }}
+            >
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Download}>
+                Order report (for records)
               </Btn>
             </a>
             <Btn

@@ -243,16 +243,44 @@ export const reportRouter = router({
     }),
 
   /** Closed inbound orders within the date range with qty received + variance. */
+  /**
+   * Inbound orders across every status (not just closed), with a
+   * status filter for the UI. Powers /reports/received. Records the
+   * linked supplier / customer / receiving-location as IDs only —
+   * the UI joins against its own query results for the label, keeping
+   * this query cheap.
+   */
   receivedOrders: tenantProcedure
-    .input(dateRange)
+    .input(
+      z.object({
+        ...dateRangeShape,
+        statuses: z
+          .array(z.enum(["draft", "open", "receiving", "closed", "cancelled"]))
+          .optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
+      // Filter on closed_at when only closed orders are requested (the
+      // default today); fall back to created_at for the broader view so
+      // open / receiving / cancelled orders land in the window too.
+      const onlyClosed =
+        input.statuses?.length === 1 && input.statuses[0] === "closed";
+      const dateCol = onlyClosed
+        ? schema.inboundOrders.closedAt
+        : schema.inboundOrders.createdAt;
       return ctx.db
         .select({
           id: schema.inboundOrders.id,
           reference: schema.inboundOrders.reference,
           supplier: schema.inboundOrders.supplier,
+          supplierId: schema.inboundOrders.supplierId,
+          customerId: schema.inboundOrders.customerId,
+          receivingLocationId: schema.inboundOrders.receivingLocationId,
+          status: schema.inboundOrders.status,
           closedAt: schema.inboundOrders.closedAt,
+          createdAt: schema.inboundOrders.createdAt,
+          expectedAt: schema.inboundOrders.expectedAt,
           closeReason: schema.inboundOrders.closeReason,
           qtyExpected: sql<number>`coalesce(sum(${schema.inboundLines.qtyExpected}),0)::int`,
           qtyReceived: sql<number>`coalesce(sum(${schema.inboundLines.qtyReceived}),0)::int`,
@@ -265,19 +293,27 @@ export const reportRouter = router({
         .where(
           and(
             eq(schema.inboundOrders.organizationId, orgId),
-            eq(schema.inboundOrders.status, "closed"),
-            input.from ? gte(schema.inboundOrders.closedAt, input.from) : undefined,
-            input.to ? lte(schema.inboundOrders.closedAt, input.to) : undefined,
+            input.statuses && input.statuses.length > 0
+              ? inArray(schema.inboundOrders.status, input.statuses)
+              : undefined,
+            input.from ? gte(dateCol, input.from) : undefined,
+            input.to ? lte(dateCol, input.to) : undefined,
           ),
         )
         .groupBy(
           schema.inboundOrders.id,
           schema.inboundOrders.reference,
           schema.inboundOrders.supplier,
+          schema.inboundOrders.supplierId,
+          schema.inboundOrders.customerId,
+          schema.inboundOrders.receivingLocationId,
+          schema.inboundOrders.status,
           schema.inboundOrders.closedAt,
+          schema.inboundOrders.createdAt,
+          schema.inboundOrders.expectedAt,
           schema.inboundOrders.closeReason,
         )
-        .orderBy(desc(schema.inboundOrders.closedAt));
+        .orderBy(desc(dateCol));
     }),
 
   /**

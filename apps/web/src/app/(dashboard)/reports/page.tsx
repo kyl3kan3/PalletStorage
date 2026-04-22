@@ -41,8 +41,8 @@ export default function ReportsPage() {
           href="/reports/received"
           icon={Ic.Inbound}
           tint="mint"
-          title="Received orders"
-          desc="Closed inbounds with expected vs received and any short-close reason."
+          title="Inbound orders"
+          desc="Every inbound, any status — with expected vs received and any short-close reason."
         />
         <Tile
           href="/reports/valuation"
