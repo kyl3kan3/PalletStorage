@@ -20,8 +20,6 @@ export default function ProductsPage() {
 
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
-  const [unitsPerCase, setUnitsPerCase] = useState("");
-  const [casesPerPallet, setCasesPerPallet] = useState("");
   const [barcode, setBarcode] = useState("");
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -105,20 +103,10 @@ export default function ProductsPage() {
           style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}
           onSubmit={(e) => {
             e.preventDefault();
-            const upc = Number(unitsPerCase);
-            const cpp = Number(casesPerPallet);
-            create.mutate({
-              sku: sku.trim() || undefined,
-              name,
-              barcode: barcode || undefined,
-              unitsPerCase: Number.isFinite(upc) && upc >= 1 ? Math.floor(upc) : undefined,
-              casesPerPallet: Number.isFinite(cpp) && cpp >= 1 ? Math.floor(cpp) : undefined,
-            });
+            create.mutate({ sku: sku.trim() || undefined, name, barcode: barcode || undefined });
             setSku("");
             setName("");
             setBarcode("");
-            setUnitsPerCase("");
-            setCasesPerPallet("");
           }}
         >
           <Field label="SKU (optional)">
@@ -144,28 +132,6 @@ export default function ProductsPage() {
               value={barcode}
               onChange={(e) => setBarcode(e.target.value)}
               placeholder="optional"
-            />
-          </Field>
-          <Field label="Items per case">
-            <TextField
-              t={t}
-              type="number"
-              min={1}
-              value={unitsPerCase}
-              onChange={(e) => setUnitsPerCase(e.target.value)}
-              placeholder="1"
-              style={{ width: 110 }}
-            />
-          </Field>
-          <Field label="Cases per pallet">
-            <TextField
-              t={t}
-              type="number"
-              min={1}
-              value={casesPerPallet}
-              onChange={(e) => setCasesPerPallet(e.target.value)}
-              placeholder="1"
-              style={{ width: 110 }}
             />
           </Field>
           <Btn t={t} variant="accent" size="md" icon={Ic.Plus} type="submit" disabled={create.isPending}>

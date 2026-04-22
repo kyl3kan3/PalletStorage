@@ -254,13 +254,6 @@ export const products = pgTable(
     heightMm: integer("height_mm"),
     weightKg: numeric("weight_kg", { precision: 10, scale: 3 }),
     velocityClass: text("velocity_class"),
-    // Pack hierarchy. unitsPerCase = eaches in one case; casesPerPallet
-    // = cases on one standard pallet. Used to convert line qtyExpected/
-    // qtyOrdered (which can be in pallets or cases) into eaches for
-    // receiving comparisons and pick allocation. Defaulting to 1 keeps
-    // the pre-existing each-only behavior untouched.
-    unitsPerCase: integer("units_per_case").notNull().default(1),
-    casesPerPallet: integer("cases_per_pallet").notNull().default(1),
     // Unit price in cents. Used by the QuickBooks export to compute the
     // Line.Amount on Bills (cost) and Invoices (sell). Nullable so
     // existing rows aren't forced into a price they don't have yet.

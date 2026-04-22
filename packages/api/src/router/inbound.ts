@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
-import { toEaches } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { assertInboundTransition, type InboundStatus } from "./_stateMachine";
@@ -249,27 +248,16 @@ export const inboundRouter = router({
         .where(and(eq(schema.inboundOrders.id, input.id), eq(schema.inboundOrders.organizationId, orgId)))
         .limit(1);
       if (!order) return null;
-      const lineRows = await ctx.db
-        .select({
-          id: schema.inboundLines.id,
-          organizationId: schema.inboundLines.organizationId,
-          inboundOrderId: schema.inboundLines.inboundOrderId,
-          productId: schema.inboundLines.productId,
-          qtyExpected: schema.inboundLines.qtyExpected,
-          qtyReceived: schema.inboundLines.qtyReceived,
-          qtyUnit: schema.inboundLines.qtyUnit,
-          unitsPerCase: schema.products.unitsPerCase,
-          casesPerPallet: schema.products.casesPerPallet,
-        })
+      const lines = await ctx.db
+        .select()
         .from(schema.inboundLines)
-        .leftJoin(schema.products, eq(schema.products.id, schema.inboundLines.productId))
         .where(
           and(
             eq(schema.inboundLines.inboundOrderId, order.id),
             eq(schema.inboundLines.organizationId, orgId),
           ),
         );
-      return { order, lines: lineRows };
+      return { order, lines };
     }),
 
   receiveLine: tenantProcedure
@@ -367,27 +355,7 @@ export const inboundRouter = router({
           .select()
           .from(schema.inboundLines)
           .where(eq(schema.inboundLines.inboundOrderId, order.id));
-
-        // qtyReceived is summed from pallet_items (always eaches);
-        // qtyExpected can be in pallets/cases/eaches. Convert expected
-        // to eaches using each product's pack hierarchy for comparison.
-        const productIds = Array.from(new Set(lines.map((l) => l.productId)));
-        const packRows = productIds.length
-          ? await tx
-              .select({
-                id: schema.products.id,
-                unitsPerCase: schema.products.unitsPerCase,
-                casesPerPallet: schema.products.casesPerPallet,
-              })
-              .from(schema.products)
-              .where(inArray(schema.products.id, productIds))
-          : [];
-        const packById = new Map(packRows.map((p) => [p.id, p]));
-        const shortLines = lines.filter((l) => {
-          const pack = packById.get(l.productId) ?? {};
-          const expectedEaches = toEaches(l.qtyExpected, l.qtyUnit, pack);
-          return l.qtyReceived < expectedEaches;
-        });
+        const shortLines = lines.filter((l) => l.qtyReceived < l.qtyExpected);
         if (shortLines.length > 0 && !input.closeReason) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",

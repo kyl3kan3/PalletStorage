@@ -30,9 +30,13 @@ export function NewCustomerModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.customer.create.useMutation({
-    onSuccess: (row) => {
-      utils.customer.list.invalidate();
-      utils.customer.search.invalidate();
+    onSuccess: async (row) => {
+      // Await refetch so the parent dropdown re-renders with the
+      // new option BEFORE we auto-select it and close.
+      await Promise.all([
+        utils.customer.list.invalidate(),
+        utils.customer.search.invalidate(),
+      ]);
       if (row) onCreated(row.id);
       reset();
       onClose();

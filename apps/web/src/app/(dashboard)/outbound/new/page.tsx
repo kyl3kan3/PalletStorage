@@ -237,7 +237,7 @@ export default function NewOutboundPage() {
             {lines.length === 0 ? (
               <button
                 type="button"
-                onClick={() => setNewProductRow(-1)}
+                onClick={addLine}
                 style={{
                   width: "100%",
                   padding: "28px 16px",
@@ -272,7 +272,9 @@ export default function NewOutboundPage() {
                 </div>
                 <div>Add an item to this order</div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: t.muted }}>
-                  Click to create a new product and add it to this order
+                  {noProducts
+                    ? "We'll help you add a product along the way"
+                    : "Pick an existing product, or use + to create a new one"}
                 </div>
               </button>
             ) : (

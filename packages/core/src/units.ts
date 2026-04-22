@@ -1,33 +1,12 @@
 /**
- * Pack-hierarchy conversions. Order lines can be entered in any of
- * {each, case, pallet}; downstream logic (receiving comparisons, pick
- * allocation) runs in eaches, so we convert via the product's own
- * unitsPerCase + casesPerPallet.
- *
- * Both pack fields are `NOT NULL DEFAULT 1`, so the worst case — a
- * product with no packaging config — reduces to an each-only product
- * and the math is a no-op.
+ * Pure UI label for the qty unit on an order line. Units are
+ * independent — "5 pallets" and "5 cases" aren't convertible, they're
+ * just two different ways a customer can describe what's on an order.
+ * Downstream code compares qtyExpected/qtyReceived numerically without
+ * translation.
  */
 
 export type QtyUnit = "each" | "case" | "pallet";
-
-export interface PackHierarchy {
-  unitsPerCase?: number | null;
-  casesPerPallet?: number | null;
-}
-
-export function toEaches(qty: number, unit: QtyUnit, product: PackHierarchy): number {
-  const upc = Math.max(1, product.unitsPerCase ?? 1);
-  const cpp = Math.max(1, product.casesPerPallet ?? 1);
-  switch (unit) {
-    case "each":
-      return qty;
-    case "case":
-      return qty * upc;
-    case "pallet":
-      return qty * upc * cpp;
-  }
-}
 
 export function qtyUnitLabel(unit: QtyUnit, plural = true): string {
   switch (unit) {

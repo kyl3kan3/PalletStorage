@@ -30,8 +30,8 @@ export function NewProductModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.product.create.useMutation({
-    onSuccess: (row) => {
-      utils.product.search.invalidate();
+    onSuccess: async (row) => {
+      await utils.product.search.invalidate();
       if (row) onCreated(row.id);
       reset();
       onClose();
@@ -41,28 +41,20 @@ export function NewProductModal({
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [barcode, setBarcode] = useState("");
-  const [unitsPerCase, setUnitsPerCase] = useState("");
-  const [casesPerPallet, setCasesPerPallet] = useState("");
 
   function reset() {
     setName("");
     setSku("");
     setBarcode("");
-    setUnitsPerCase("");
-    setCasesPerPallet("");
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const upc = Number(unitsPerCase);
-    const cpp = Number(casesPerPallet);
     create.mutate({
       name: name.trim(),
       sku: sku.trim() || undefined,
       barcode: barcode.trim() || undefined,
-      unitsPerCase: Number.isFinite(upc) && upc >= 1 ? Math.floor(upc) : undefined,
-      casesPerPallet: Number.isFinite(cpp) && cpp >= 1 ? Math.floor(cpp) : undefined,
     });
   }
 
@@ -100,29 +92,6 @@ export function NewProductModal({
             placeholder="Optional"
           />
         </FormGrid>
-
-        <div>
-          <FormGrid>
-            <Input
-              label="Items per case"
-              type="number"
-              value={unitsPerCase}
-              onChange={setUnitsPerCase}
-              placeholder="1"
-            />
-            <Input
-              label="Cases per pallet"
-              type="number"
-              value={casesPerPallet}
-              onChange={setCasesPerPallet}
-              placeholder="1"
-            />
-          </FormGrid>
-          <HelpText>
-            Used when an order is entered in cases or pallets — we convert to items
-            for stock checks. Leave blank if this product isn&apos;t packaged.
-          </HelpText>
-        </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Btn
