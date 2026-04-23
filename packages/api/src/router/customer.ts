@@ -141,7 +141,9 @@ export const customerRouter = router({
       };
     }),
 
-  create: managerProcedure.input(profile).mutation(async ({ ctx, input }) => {
+  // tenantProcedure (not managerProcedure) — frontline intake needs to
+  // onboard new clients as pallets arrive, matching product.create.
+  create: tenantProcedure.input(profile).mutation(async ({ ctx, input }) => {
     const orgId = await requireOrgId(ctx);
     const clean = normalize(input) as typeof schema.customers.$inferInsert;
     const [row] = await ctx.db

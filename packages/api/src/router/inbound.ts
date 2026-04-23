@@ -142,19 +142,24 @@ export const inboundRouter = router({
       return { ok: true };
     }),
 
-  /** Edit qtyExpected on a line. Received qty is unchanged. */
+  /** Edit qtyExpected (and optionally qtyUnit) on a line. Received qty is unchanged. */
   updateLine: managerProcedure
     .input(
       z.object({
         lineId: z.string().uuid(),
         qtyExpected: z.number().int().positive(),
+        qtyUnit: z.enum(["each", "case", "pallet"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
+      const patch: { qtyExpected: number; qtyUnit?: "each" | "case" | "pallet" } = {
+        qtyExpected: input.qtyExpected,
+      };
+      if (input.qtyUnit) patch.qtyUnit = input.qtyUnit;
       const result = await ctx.db
         .update(schema.inboundLines)
-        .set({ qtyExpected: input.qtyExpected })
+        .set(patch)
         .where(
           and(
             eq(schema.inboundLines.id, input.lineId),

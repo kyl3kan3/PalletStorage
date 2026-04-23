@@ -100,6 +100,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   // "Add line" picker inside edit mode.
   const [addProductId, setAddProductId] = useState("");
   const [addQty, setAddQty] = useState(1);
+  const [addQtyUnit, setAddQtyUnit] = useState<"each" | "case" | "pallet">("each");
 
   const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
   const status = order?.status ?? "…";
@@ -395,7 +396,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 100px 140px",
+                gridTemplateColumns: "1fr 80px 100px 140px",
                 gap: 12,
                 padding: "14px 20px",
                 borderTop: `1.5px dashed ${t.border}`,
@@ -420,8 +421,19 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                 min={1}
                 value={addQty}
                 onChange={(e) => setAddQty(Number(e.target.value))}
-                style={{ width: 100 }}
+                style={{ width: 80 }}
               />
+              <Select
+                value={addQtyUnit}
+                onChange={(e) =>
+                  setAddQtyUnit(e.target.value as "each" | "case" | "pallet")
+                }
+                aria-label="Unit"
+              >
+                <option value="each">items</option>
+                <option value="case">cases</option>
+                <option value="pallet">pallets</option>
+              </Select>
               <Btn
                 t={t}
                 variant="primary"
@@ -434,11 +446,13 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                       inboundOrderId: id,
                       productId: addProductId,
                       qtyExpected: addQty,
+                      qtyUnit: addQtyUnit,
                     },
                     {
                       onSuccess: () => {
                         setAddProductId("");
                         setAddQty(1);
+                        setAddQtyUnit("each");
                       },
                     },
                   )
