@@ -280,9 +280,12 @@ export default function NewOutboundPage() {
             ) : (
               <Card t={t} padding={0}>
                 <div
+                  data-item-header
+                  data-no-grid-min
                   style={{
                     display: "grid",
                     gridTemplateColumns: "40px 1fr 180px 36px",
+                    gridTemplateAreas: '"idx product qty remove"',
                     gap: 10,
                     padding: "10px 16px",
                     fontSize: 10.5,
@@ -292,27 +295,37 @@ export default function NewOutboundPage() {
                     fontWeight: 600,
                   }}
                 >
-                  <div>#</div>
-                  <div>Product</div>
-                  <div>Ordered qty</div>
-                  <div />
+                  <div style={{ gridArea: "idx" }}>#</div>
+                  <div style={{ gridArea: "product" }}>Product</div>
+                  <div style={{ gridArea: "qty" }}>Ordered qty</div>
+                  <div style={{ gridArea: "remove" }} />
                 </div>
                 {lines.map((l, i) => (
                   <div
                     key={i}
+                    data-item-row
+                    data-no-grid-min
                     style={{
                       display: "grid",
                       gridTemplateColumns: "40px 1fr 180px 36px",
+                      gridTemplateAreas: '"idx product qty remove"',
                       gap: 10,
                       padding: "10px 16px",
                       borderTop: `1.5px dashed ${t.border}`,
                       alignItems: "center",
                     }}
                   >
-                    <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+                    <span
+                      style={{
+                        gridArea: "idx",
+                        color: t.muted,
+                        fontFamily: FONTS.mono,
+                        fontSize: 12,
+                      }}
+                    >
                       {i + 1}
                     </span>
-                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                    <div style={{ gridArea: "product", display: "flex", gap: 6, minWidth: 0 }}>
                       <Select
                         value={l.productId}
                         onChange={(e) => updateLine(i, { productId: e.target.value })}
@@ -345,7 +358,7 @@ export default function NewOutboundPage() {
                         +
                       </button>
                     </div>
-                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                    <div style={{ gridArea: "qty", display: "flex", gap: 6, minWidth: 0 }}>
                       <TextField
                         t={t}
                         type="number"
@@ -374,6 +387,8 @@ export default function NewOutboundPage() {
                       onClick={() => removeLine(i)}
                       aria-label="Remove item"
                       style={{
+                        gridArea: "remove",
+                        justifySelf: "end",
                         width: 30,
                         height: 30,
                         borderRadius: 8,

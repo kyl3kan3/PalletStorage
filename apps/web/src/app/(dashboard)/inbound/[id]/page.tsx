@@ -394,9 +394,12 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
 
           {editing && canEdit && (
             <div
+              data-add-line-row
+              data-no-grid-min
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 80px 100px 140px",
+                gridTemplateAreas: '"product qtynum qtyunit action"',
                 gap: 12,
                 padding: "14px 20px",
                 borderTop: `1.5px dashed ${t.border}`,
@@ -407,6 +410,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               <Select
                 value={addProductId}
                 onChange={(e) => setAddProductId(e.target.value)}
+                style={{ gridArea: "product" }}
               >
                 <option value="">Add a product…</option>
                 {products.data?.map((p) => (
@@ -421,7 +425,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                 min={1}
                 value={addQty}
                 onChange={(e) => setAddQty(Number(e.target.value))}
-                style={{ width: 80 }}
+                style={{ gridArea: "qtynum", width: 80 }}
               />
               <Select
                 value={addQtyUnit}
@@ -429,11 +433,13 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                   setAddQtyUnit(e.target.value as "each" | "case" | "pallet")
                 }
                 aria-label="Unit"
+                style={{ gridArea: "qtyunit" }}
               >
                 <option value="each">items</option>
                 <option value="case">cases</option>
                 <option value="pallet">pallets</option>
               </Select>
+              <div style={{ gridArea: "action", justifySelf: "start" }}>
               <Btn
                 t={t}
                 variant="primary"
@@ -460,6 +466,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               >
                 {addLine.isPending ? "Adding…" : "Add line"}
               </Btn>
+              </div>
             </div>
           )}
 

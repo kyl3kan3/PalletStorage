@@ -58,6 +58,45 @@ body {
   .cl-organizationSwitcherTrigger .cl-organizationPreviewMainIdentifier {
     display: none;
   }
+
+  /* Item-row layout (new-order forms + "Add line" widget on order
+   * detail pages): instead of a fixed-column grid that triggers
+   * horizontal scroll, stack product / qty+unit / idx+remove
+   * vertically so phones can actually fill the form in. Requires
+   * data-item-row on the row container and data-item-header on the
+   * header row; each child uses gridArea inline to name its cell. */
+  [data-item-row] {
+    grid-template-columns: auto 1fr auto !important;
+    grid-template-areas:
+      "idx . remove"
+      "product product product"
+      "qty qty qty" !important;
+    min-width: 0 !important;
+    gap: 8px 10px !important;
+  }
+  [data-item-header] {
+    display: none !important;
+  }
+
+  /* Escape hatch for flush-card table grids that should NOT pin to
+   * 720px min-width on mobile (e.g. item rows above that stack). */
+  [data-card][data-card-flush] > [data-no-grid-min] {
+    min-width: 0 !important;
+  }
+
+  /* "Add line" row on order detail: same stacking idea. Product
+   * picker spans full width; qty + unit share the second row; the
+   * action button sits on its own row so the touch target stays
+   * comfortable. */
+  [data-add-line-row] {
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-areas:
+      "product product"
+      "qtynum qtyunit"
+      "action action" !important;
+    min-width: 0 !important;
+    gap: 10px !important;
+  }
 }
 
 /* Every <table> / card-wrapped grid should never force overflow on
