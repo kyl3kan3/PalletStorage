@@ -30,15 +30,17 @@ export function NewProductModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.product.create.useMutation({
-    onSuccess: (row) => {
+    onSuccess: async (row) => {
       if (!row) {
         console.error("[NewProductModal] create returned no row");
         return;
       }
+      // Wait for parent dropdowns to refetch before auto-selecting,
+      // so the new product id maps to an actual <option>.
+      await utils.product.search.invalidate();
       onCreated(row.id);
       reset();
       onClose();
-      utils.product.search.invalidate();
     },
     onError: (error) => {
       console.error("[NewProductModal] create failed:", error);

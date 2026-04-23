@@ -30,24 +30,24 @@ export function NewCustomerModal({
   const t = theme;
   const utils = trpc.useUtils();
   const create = trpc.customer.create.useMutation({
-    onSuccess: (row) => {
+    onSuccess: async (row) => {
       if (!row) {
-        // Server said 'ok' but returned nothing — treat as failure so
-        // the user isn't left wondering why the modal closed silently.
         console.error("[NewCustomerModal] create returned no row");
         return;
       }
+      // Wait for the parent's dropdown queries to refetch with the
+      // new row BEFORE we call onCreated() — otherwise the parent
+      // tries to select an id that isn't yet in its option list and
+      // the Select renders blank.
+      await Promise.all([
+        utils.customer.list.invalidate(),
+        utils.customer.search.invalidate(),
+      ]);
       onCreated(row.id);
       reset();
       onClose();
-      // Fire-and-forget — the parent dropdown refetches once these
-      // settle. Don't await so the modal closes instantly on success.
-      utils.customer.list.invalidate();
-      utils.customer.search.invalidate();
     },
     onError: (error) => {
-      // Surface in console for debugging; the inline error below also
-      // renders the message text.
       console.error("[NewCustomerModal] create failed:", error);
     },
   });
