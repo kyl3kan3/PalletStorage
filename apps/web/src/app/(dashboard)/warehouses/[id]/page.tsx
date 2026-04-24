@@ -159,17 +159,25 @@ export default function WarehouseDetailPage({
     return out;
   }, [aisles]);
 
-  const layoutReady = aisles.every(
-    (a) =>
-      a.letter.trim().length > 0 &&
-      a.bayCount >= 1 &&
-      a.levelsPerBay >= 1 &&
-      a.positionsPerLevel >= 1 &&
-      a.startX !== null &&
-      a.startY !== null &&
-      a.endX !== null &&
-      a.endY !== null,
-  );
+  // Per-row diagnosis of what's still missing so the user can see
+  // exactly why Generate & place is disabled. Returned as an array
+  // of short human strings, one per incomplete aisle.
+  const layoutIssues: string[] = [];
+  for (const a of aisles) {
+    const bits: string[] = [];
+    if (!a.letter.trim()) bits.push("letter");
+    if (!(a.bayCount >= 1)) bits.push("bays");
+    if (!(a.levelsPerBay >= 1)) bits.push("levels");
+    if (!(a.positionsPerLevel >= 1)) bits.push("positions");
+    if (a.startX === null || a.startY === null) bits.push("start pin");
+    if (a.endX === null || a.endY === null) bits.push("end pin");
+    if (bits.length > 0) {
+      layoutIssues.push(
+        `Aisle ${a.letter || "?"}: needs ${bits.join(", ")}`,
+      );
+    }
+  }
+  const layoutReady = layoutIssues.length === 0 && aisles.length > 0;
   const layoutTotal = aisles.reduce(
     (n, a) => n + a.bayCount * a.levelsPerBay * a.positionsPerLevel,
     0,
@@ -850,6 +858,27 @@ export default function WarehouseDetailPage({
                   }}
                 >
                   {detect.error.message}
+                </div>
+              )}
+              {!layoutReady && layoutIssues.length > 0 && (
+                <div
+                  style={{
+                    background: t.surfaceAlt,
+                    border: `1.5px dashed ${t.border}`,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: t.body,
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    Can&apos;t generate yet —
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {layoutIssues.map((msg, i) => (
+                      <li key={i}>{msg}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
               {bulkLayout.error && (
