@@ -254,26 +254,36 @@ export default function WarehouseDetailPage({
       warehouseId: id,
       imageDataUrl,
     });
-    // Merge detected aisles into existing drafts. If we already have
-    // an aisle draft with the same letter, update its bayCount; else
-    // append a new row. Endpoints stay unset so the user still pins.
+    // Merge detected aisles into existing drafts. If an aisle with
+    // the same letter is already in the list we update its bayCount
+    // and coords (but only overwrite coords when the model returned
+    // them — don't nuke user-pinned positions with undefined). New
+    // aisles append. Placement is immediate; user reviews + edits.
     if (result.aisles.length > 0) {
       setAisles((prev) => {
         const byLetter = new Map(prev.map((a) => [a.letter.toUpperCase(), a]));
         for (const d of result.aisles) {
           const existing = byLetter.get(d.letter);
+          const startX = d.startX ?? existing?.startX ?? null;
+          const startY = d.startY ?? existing?.startY ?? null;
+          const endX = d.endX ?? existing?.endX ?? null;
+          const endY = d.endY ?? existing?.endY ?? null;
           if (existing) {
             if (d.bayCount) existing.bayCount = d.bayCount;
+            if (d.startX !== undefined) existing.startX = d.startX;
+            if (d.startY !== undefined) existing.startY = d.startY;
+            if (d.endX !== undefined) existing.endX = d.endX;
+            if (d.endY !== undefined) existing.endY = d.endY;
           } else {
             byLetter.set(d.letter, {
               letter: d.letter,
               bayCount: d.bayCount ?? 20,
               levelsPerBay: prev[0]?.levelsPerBay ?? 4,
               positionsPerLevel: prev[0]?.positionsPerLevel ?? 2,
-              startX: null,
-              startY: null,
-              endX: null,
-              endY: null,
+              startX,
+              startY,
+              endX,
+              endY,
               reverseBayNumbers: false,
             });
           }
@@ -809,15 +819,25 @@ export default function WarehouseDetailPage({
                 )}
                 {detect.data && detect.data.aisles.length === 0 && (
                   <span style={{ fontSize: 12, color: t.muted }}>
-                    Firecrawl parsed the PDF but didn&apos;t find aisle labels.
-                    Add them manually.
+                    Vision couldn&apos;t find any aisles. Add them manually.
                   </span>
                 )}
-                {detect.data && detect.data.aisles.length > 0 && (
-                  <span style={{ fontSize: 12, color: t.muted }}>
-                    Detected {detect.data.aisles.length} aisle(s) — review + pin start/end for each.
-                  </span>
-                )}
+                {detect.data && detect.data.aisles.length > 0 && (() => {
+                  const placed = detect.data.aisles.filter(
+                    (a) =>
+                      a.startX !== undefined &&
+                      a.startY !== undefined &&
+                      a.endX !== undefined &&
+                      a.endY !== undefined,
+                  ).length;
+                  return (
+                    <span style={{ fontSize: 12, color: t.muted }}>
+                      Detected {detect.data.aisles.length} aisle(s)
+                      {placed > 0 ? `, ${placed} auto-placed on the map` : ""}
+                      . Review + adjust pins as needed.
+                    </span>
+                  );
+                })()}
               </div>
               {detect.error && (
                 <div

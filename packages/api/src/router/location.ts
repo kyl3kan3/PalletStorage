@@ -331,9 +331,11 @@ export const locationRouter = router({
         "You are analyzing a warehouse floor plan.",
         "Identify every rack aisle (a long run of pallet racking, usually labeled A, B, C, …).",
         "For each aisle, estimate how many bays it has (a bay is one column of racking between uprights, usually 3-10 ft wide).",
+        "Also return pixel-normalized coordinates for where each aisle's FIRST bay sits (startX, startY) and where its LAST bay sits (endX, endY).",
+        "Use 0-1 fractions of the image: (0,0) is top-left, (1,1) is bottom-right. startX/Y and endX/Y should land on the centers of the end bays along the aisle's actual geometry — horizontal aisles will have nearly-equal startY/endY, vertical aisles will have nearly-equal startX/endX.",
         "Ignore docks, office areas, and non-rack storage.",
-        'Return ONLY minified JSON in the shape {"aisles":[{"letter":"A","bayCount":20},{"letter":"B","bayCount":18}]}.',
-        "If you can't count bays confidently, omit the bayCount field for that aisle.",
+        'Return ONLY minified JSON in the shape {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}]}.',
+        "If you genuinely can't place an aisle, omit the coord fields for it; the UI will fall back to manual pinning.",
         "No prose, no markdown, no code fences — just the JSON.",
       ].join(" ");
 
@@ -373,24 +375,46 @@ export const locationRouter = router({
         choices?: Array<{ message?: { content?: string } }>;
       };
       const content = payload.choices?.[0]?.message?.content ?? "";
-      let aisles: Array<{ letter: string; bayCount?: number }> = [];
+      const clampFrac = (v: unknown): number | undefined => {
+        if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+        return Math.max(0, Math.min(1, v));
+      };
+      let aisles: Array<{
+        letter: string;
+        bayCount?: number;
+        startX?: number;
+        startY?: number;
+        endX?: number;
+        endY?: number;
+      }> = [];
       try {
         const parsed = JSON.parse(content) as {
-          aisles?: Array<{ letter?: unknown; bayCount?: unknown }>;
+          aisles?: Array<{
+            letter?: unknown;
+            bayCount?: unknown;
+            startX?: unknown;
+            startY?: unknown;
+            endX?: unknown;
+            endY?: unknown;
+          }>;
         };
         aisles = (parsed.aisles ?? [])
           .map((a) => ({
             letter:
-              typeof a.letter === "string" ? a.letter.toUpperCase().slice(0, 3) : "",
+              typeof a.letter === "string"
+                ? a.letter.toUpperCase().slice(0, 3)
+                : "",
             bayCount:
               typeof a.bayCount === "number" && Number.isFinite(a.bayCount)
                 ? Math.max(1, Math.round(a.bayCount))
                 : undefined,
+            startX: clampFrac(a.startX),
+            startY: clampFrac(a.startY),
+            endX: clampFrac(a.endX),
+            endY: clampFrac(a.endY),
           }))
           .filter((a) => a.letter.length > 0);
       } catch {
-        // If the model drifted and returned text despite response_format,
-        // fall back to the regex-based text parser.
         aisles = parseAislesFromText(content);
       }
       return { aisles };
