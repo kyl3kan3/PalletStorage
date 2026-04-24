@@ -195,6 +195,16 @@ export const outboundRouter = router({
         );
 
         if (ordered.length) {
+          // Auto-assign the generated picks to the caller so their
+          // Tasks page shows them immediately. A manager can reassign
+          // later from /tasks if they want to delegate. Without this
+          // every pick lands unassigned and Tasks is always blank.
+          const [user] = await tx
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(eq(schema.users.clerkUserId, ctx.userId))
+            .limit(1);
+          const assignedUserId = user?.id ?? null;
           await tx.insert(schema.picks).values(
             ordered.map((o, i) => ({
               organizationId: orgId,
@@ -203,6 +213,7 @@ export const outboundRouter = router({
               fromLocationId: o.payload.fromLocationId,
               qty: o.payload.qty,
               sequence: i,
+              assignedUserId,
             })),
           );
         }
