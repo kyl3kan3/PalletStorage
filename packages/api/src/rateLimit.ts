@@ -12,6 +12,7 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+let lastSweep = 0;
 
 export interface RateLimitOpts {
   /** Window length in ms. Default: 60_000 (1 minute). */
@@ -24,6 +25,15 @@ export function rateLimit(key: string, opts: RateLimitOpts = {}): void {
   const windowMs = opts.windowMs ?? 60_000;
   const max = opts.max ?? 120;
   const now = Date.now();
+
+  // Opportunistic eviction to avoid unbounded memory growth in long-lived
+  // processes with high key churn.
+  if (now - lastSweep >= windowMs) {
+    for (const [k, bucket] of buckets.entries()) {
+      if (now - bucket.windowStart >= windowMs) buckets.delete(k);
+    }
+    lastSweep = now;
+  }
 
   let b = buckets.get(key);
   if (!b || now - b.windowStart >= windowMs) {
@@ -42,4 +52,5 @@ export function rateLimit(key: string, opts: RateLimitOpts = {}): void {
 /** For tests. */
 export function __resetRateLimit(): void {
   buckets.clear();
+  lastSweep = 0;
 }

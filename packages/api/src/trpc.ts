@@ -1,4 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
+import { sql } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { randomUUID } from "node:crypto";
@@ -47,9 +48,18 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
 });
 
 /** Tenant-scoped: requires a user AND an active org. */
-export const tenantProcedure = authedProcedure.use(({ ctx, next }) => {
-  if (!ctx.orgId) throw new TRPCError({ code: "FORBIDDEN", message: "No active organization" });
-  return next({ ctx: { ...ctx, orgId: ctx.orgId } });
+export const tenantProcedure = authedProcedure.use(async ({ ctx, next }) => {
+  const orgId = ctx.orgId;
+  if (!orgId) throw new TRPCError({ code: "FORBIDDEN", message: "No active organization" });
+  // Enforce DB tenant context in-band for every tenant procedure so RLS
+  // remains active even if a downstream query forgets an explicit
+  // organizationId predicate.
+  return ctx.db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.org_id', ${orgId}, true)`);
+    return next({
+      ctx: { ...ctx, db: tx as unknown as Db, orgId },
+    });
+  });
 });
 
 /** Manager or admin — gate for sign-off actions (close, approve). */
