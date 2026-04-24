@@ -32,12 +32,20 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
     },
   });
   const shipmentsQ = trpc.outbound.shipments.useQuery({ outboundOrderId: id });
+  const picksQ = trpc.outbound.picksForOrder.useQuery({ outboundOrderId: id });
+  const completePick = trpc.outbound.completePick.useMutation({
+    onSuccess: () => {
+      utils.outbound.byId.invalidate({ id });
+      utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
+    },
+  });
   const exportOutbound = trpc.quickbooks.exportOutbound.useMutation();
   const qbStatus = trpc.quickbooks.status.useQuery();
 
   const [cancelReason, setCancelReason] = useState("");
   const [carrier, setCarrier] = useState("");
   const [tracking, setTracking] = useState("");
+  const [stagingByPick, setStagingByPick] = useState<Record<string, string>>({});
 
   const order = detail.data?.order;
   const lines = detail.data?.lines ?? [];
@@ -49,6 +57,17 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
     isManager && (status === "draft" || status === "open" || status === "picking");
   const allLinesPicked =
     lines.length > 0 && lines.every((l) => l.qtyPicked >= l.qtyOrdered);
+
+  // Staging/dock locations in this order's warehouse — used by the
+  // pick-completion dropdown. Only fetched once we have the order so
+  // we know which warehouse to look in.
+  const locations = trpc.location.listByWarehouse.useQuery(
+    { warehouseId: order?.warehouseId ?? "" },
+    { enabled: !!order?.warehouseId },
+  );
+  const stagingCandidates = (locations.data ?? []).filter(
+    (l) => l.type === "dock" || l.type === "staging",
+  );
 
   return (
     <div>
@@ -195,6 +214,183 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </Card>
+
+      {/* Picks list — shown once generatePicks has run so the user can
+          confirm each pick as it's pulled from its source location.
+          Completed picks stay visible to give the closer a full trail. */}
+      {picksQ.data && picksQ.data.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: t.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              fontWeight: 600,
+              marginBottom: 10,
+            }}
+          >
+            Picks ({picksQ.data.filter((p) => p.completedAt).length}/
+            {picksQ.data.length} complete)
+          </div>
+          <Card t={t} padding={0}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "40px 1fr 1fr 80px 1fr 200px",
+                gap: 12,
+                padding: "12px 16px",
+                fontSize: 10.5,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+              }}
+            >
+              <div>#</div>
+              <div>From</div>
+              <div>Pallet</div>
+              <div>Qty</div>
+              <div>Status</div>
+              <div />
+            </div>
+            {picksQ.data.map((p, idx) => {
+              const done = !!p.completedAt;
+              const stagingId = stagingByPick[p.pickId] ?? "";
+              return (
+                <div
+                  key={p.pickId}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "40px 1fr 1fr 80px 1fr 200px",
+                    gap: 12,
+                    padding: "12px 16px",
+                    borderTop: `1.5px dashed ${t.border}`,
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      color: t.muted,
+                      fontFamily: FONTS.mono,
+                      fontSize: 12,
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <span style={{ fontSize: 13 }}>
+                    {p.fromLocationCode ?? "—"}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: FONTS.mono,
+                      fontSize: 12,
+                      color: t.body,
+                    }}
+                  >
+                    {p.palletLpn ?? "—"}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: FONTS.mono,
+                      fontWeight: 600,
+                      color: t.ink,
+                    }}
+                  >
+                    {p.qty}
+                  </span>
+                  <span>
+                    {done ? (
+                      <Tag t={t} tone="mint">
+                        picked
+                      </Tag>
+                    ) : (
+                      <Tag t={t} tone="primary">
+                        pending
+                      </Tag>
+                    )}
+                  </span>
+                  {done ? (
+                    <span style={{ fontSize: 11, color: t.muted }}>
+                      {p.completedAt?.toLocaleString()}
+                    </span>
+                  ) : !isTerminal ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <select
+                        value={stagingId}
+                        onChange={(e) =>
+                          setStagingByPick((prev) => ({
+                            ...prev,
+                            [p.pickId]: e.target.value,
+                          }))
+                        }
+                        aria-label="Staging location"
+                        style={{
+                          flex: 1,
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          background: t.surfaceAlt,
+                          border: `1.5px solid ${t.border}`,
+                          fontSize: 12,
+                          color: t.ink,
+                        }}
+                      >
+                        <option value="">Staging…</option>
+                        {stagingCandidates.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.code} ({l.type})
+                          </option>
+                        ))}
+                      </select>
+                      <Btn
+                        t={t}
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        icon={Ic.Check}
+                        disabled={!stagingId || completePick.isPending}
+                        onClick={() =>
+                          completePick.mutate({
+                            pickId: p.pickId,
+                            stagingLocationId: stagingId,
+                          })
+                        }
+                      >
+                        {completePick.isPending ? "…" : "Done"}
+                      </Btn>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 11, color: t.muted }}>—</span>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+          {completePick.error && (
+            <div
+              style={{
+                marginTop: 8,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {completePick.error.message}
+            </div>
+          )}
+          {stagingCandidates.length === 0 && !locations.isLoading && (
+            <div style={{ marginTop: 8, fontSize: 12, color: t.muted }}>
+              No staging/dock locations in this warehouse yet — add one at{" "}
+              <a href="/warehouses" style={{ color: t.primaryDeep, fontWeight: 600 }}>
+                /warehouses
+              </a>{" "}
+              before confirming picks.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Confirmation toasts that used to live on the old action cards.
           Kept as inline notices because the buttons themselves now live

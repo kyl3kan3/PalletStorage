@@ -234,6 +234,42 @@ export const outboundRouter = router({
       .orderBy(schema.picks.sequence);
   }),
 
+  /**
+   * All picks on a specific order — used by the web detail page to
+   * render a completable list. Completed picks stay in the response
+   * so the user can see history ordered along the S-shape path.
+   */
+  picksForOrder: tenantProcedure
+    .input(z.object({ outboundOrderId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db
+        .select({
+          pickId: schema.picks.id,
+          outboundLineId: schema.picks.outboundLineId,
+          palletId: schema.picks.palletId,
+          qty: schema.picks.qty,
+          sequence: schema.picks.sequence,
+          completedAt: schema.picks.completedAt,
+          fromLocationId: schema.picks.fromLocationId,
+          fromLocationCode: schema.locations.code,
+          fromLocationPath: schema.locations.path,
+          palletLpn: schema.pallets.lpn,
+          productId: schema.outboundLines.productId,
+        })
+        .from(schema.picks)
+        .innerJoin(schema.outboundLines, eq(schema.outboundLines.id, schema.picks.outboundLineId))
+        .leftJoin(schema.locations, eq(schema.locations.id, schema.picks.fromLocationId))
+        .leftJoin(schema.pallets, eq(schema.pallets.id, schema.picks.palletId))
+        .where(
+          and(
+            eq(schema.picks.organizationId, orgId),
+            eq(schema.outboundLines.outboundOrderId, input.outboundOrderId),
+          ),
+        )
+        .orderBy(schema.picks.sequence);
+    }),
+
   /** Operator confirms they've pulled a pick from its source location. */
   completePick: tenantProcedure
     .input(z.object({ pickId: z.string().uuid(), stagingLocationId: z.string().uuid() }))
