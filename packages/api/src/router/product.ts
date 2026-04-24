@@ -16,7 +16,7 @@ function isUniqueViolation(e: unknown): e is { code: string; constraint_name?: s
 
 export const productRouter = router({
   search: tenantProcedure
-    .input(z.object({ q: z.string().default(""), limit: z.number().int().min(1).max(100).default(25) }))
+    .input(z.object({ q: z.string().default(""), limit: z.number().int().min(1).max(500).default(25) }))
     .query(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
       const q = `%${input.q}%`;

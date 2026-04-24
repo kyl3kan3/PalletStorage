@@ -31,16 +31,11 @@ export function NewCustomerModal({
   const utils = trpc.useUtils();
   const create = trpc.customer.create.useMutation({
     onSuccess: async (row) => {
-      console.log("[NewCustomerModal] create onSuccess, row =", row);
-      if (!row) {
-        // Server returned 200 but no row — usually RLS blocking the
-        // INSERT, or some other constraint silently dropping it.
-        // Surface it loud so the user doesn't think the modal worked.
-        alert(
-          "Saved request reached the server, but no customer row came back. Check the browser console for details, then send the output.",
-        );
-        return;
-      }
+      if (!row) return;
+      // Wait for the parent's dropdown queries to refetch with the new
+      // row BEFORE we call onCreated() — otherwise the parent tries to
+      // select an id that isn't yet in its option list and the Select
+      // renders blank.
       await Promise.all([
         utils.customer.list.invalidate(),
         utils.customer.search.invalidate(),
@@ -49,24 +44,19 @@ export function NewCustomerModal({
       reset();
       onClose();
     },
-    onError: (error) => {
-      console.error("[NewCustomerModal] create failed:", error);
-    },
   });
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const payload = {
+    create.mutate({
       name: name.trim(),
       contactName: contactName.trim() || undefined,
       email: email.trim() || undefined,
       billingLine1: billingLine1.trim() || undefined,
       billingCity: billingCity.trim() || undefined,
       billingRegion: billingRegion.trim() || undefined,
-    };
-    console.log("[NewCustomerModal] submitting", payload);
-    create.mutate(payload);
+    });
   }
 
   const [name, setName] = useState("");

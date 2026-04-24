@@ -56,7 +56,7 @@ export const customerRouter = router({
 
   /** Lightweight search for autocomplete on new-order forms. */
   search: tenantProcedure
-    .input(z.object({ q: z.string().trim().default(""), limit: z.number().int().max(50).default(20) }).default({}))
+    .input(z.object({ q: z.string().trim().default(""), limit: z.number().int().max(500).default(20) }).default({}))
     .query(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
       const q = `%${input.q}%`;
