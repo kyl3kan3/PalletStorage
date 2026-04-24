@@ -33,13 +33,50 @@ export default function WarehouseDetailPage({
   const bulk = trpc.location.bulkGenerate.useMutation({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
+  const bulkLayout = trpc.location.bulkGenerateWithLayout.useMutation({
+    onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
+  });
   const setMap = trpc.warehouse.setMapPdfUrl.useMutation({
     onSuccess: () => utils.warehouse.byId.invalidate({ id }),
   });
   const setPin = trpc.location.setMapPosition.useMutation({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
-  const [activePinId, setActivePinId] = useState<string | null>(null);
+
+  // What the next map click captures. Null = clicks are ignored.
+  // Location pinning (existing flow) and aisle endpoint pinning (new
+  // layout flow) multiplex through the same canvas + onPlace handler.
+  type ActiveCapture =
+    | { kind: "location"; id: string }
+    | { kind: "aisle-start"; idx: number }
+    | { kind: "aisle-end"; idx: number }
+    | null;
+  const [activeCapture, setActiveCapture] = useState<ActiveCapture>(null);
+
+  type AisleDraft = {
+    letter: string;
+    bayCount: number;
+    levelsPerBay: number;
+    positionsPerLevel: number;
+    startX: number | null;
+    startY: number | null;
+    endX: number | null;
+    endY: number | null;
+    reverseBayNumbers: boolean;
+  };
+  const [aisles, setAisles] = useState<AisleDraft[]>([
+    {
+      letter: "A",
+      bayCount: 20,
+      levelsPerBay: 4,
+      positionsPerLevel: 2,
+      startX: null,
+      startY: null,
+      endX: null,
+      endY: null,
+      reverseBayNumbers: false,
+    },
+  ]);
 
   const [aisleCount, setAisleCount] = useState(6);
   const [baysPerAisle, setBaysPerAisle] = useState(20);
@@ -96,6 +133,117 @@ export default function WarehouseDetailPage({
   }
 
   const racks = locations.data?.filter((l) => l.type === "rack") ?? [];
+
+  // Preview pins for the in-progress layout flow: render a dashed
+  // marker at each bay position along every aisle whose endpoints
+  // are both set, so the user sees where the generator will place
+  // things before committing.
+  const previewPins = useMemo(() => {
+    const out: { x: number; y: number; label: string; tone?: "start" | "end" | "preview" }[] = [];
+    for (const a of aisles) {
+      if (a.startX === null || a.startY === null) continue;
+      out.push({ x: a.startX, y: a.startY, label: `${a.letter} start`, tone: "start" });
+      if (a.endX !== null && a.endY !== null) {
+        out.push({ x: a.endX, y: a.endY, label: `${a.letter} end`, tone: "end" });
+        for (let b = 1; b <= a.bayCount; b++) {
+          const tRaw = a.bayCount === 1 ? 0 : (b - 1) / (a.bayCount - 1);
+          const t = a.reverseBayNumbers ? 1 - tRaw : tRaw;
+          const mx = a.startX + (a.endX - a.startX) * t;
+          const my = a.startY + (a.endY - a.startY) * t;
+          const label = `${a.letter}${String(b).padStart(2, "0")}`;
+          out.push({ x: mx, y: my, label });
+        }
+      }
+    }
+    return out;
+  }, [aisles]);
+
+  const layoutReady = aisles.every(
+    (a) =>
+      a.letter.trim().length > 0 &&
+      a.bayCount >= 1 &&
+      a.levelsPerBay >= 1 &&
+      a.positionsPerLevel >= 1 &&
+      a.startX !== null &&
+      a.startY !== null &&
+      a.endX !== null &&
+      a.endY !== null,
+  );
+  const layoutTotal = aisles.reduce(
+    (n, a) => n + a.bayCount * a.levelsPerBay * a.positionsPerLevel,
+    0,
+  );
+
+  function updateAisle(idx: number, patch: Partial<AisleDraft>) {
+    setAisles((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
+  }
+  function addAisle() {
+    setAisles((prev) => {
+      const nextLetter = nextAisleLetter(prev.map((a) => a.letter));
+      const last = prev[prev.length - 1];
+      return [
+        ...prev,
+        {
+          letter: nextLetter,
+          bayCount: last?.bayCount ?? 20,
+          levelsPerBay: last?.levelsPerBay ?? 4,
+          positionsPerLevel: last?.positionsPerLevel ?? 2,
+          startX: null,
+          startY: null,
+          endX: null,
+          endY: null,
+          reverseBayNumbers: false,
+        },
+      ];
+    });
+  }
+  function removeAisle(idx: number) {
+    setAisles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // Central click router — one handler for all map captures.
+  function handleMapPlace(x: number, y: number) {
+    if (!activeCapture) return;
+    if (activeCapture.kind === "location") {
+      setPin.mutate({ id: activeCapture.id, mapX: x, mapY: y });
+      // Keep location selected so user can re-click to reposition.
+      return;
+    }
+    if (activeCapture.kind === "aisle-start") {
+      updateAisle(activeCapture.idx, { startX: x, startY: y });
+      // Auto-advance to end pinning for the same aisle if end not set.
+      const current = aisles[activeCapture.idx];
+      if (current && (current.endX === null || current.endY === null)) {
+        setActiveCapture({ kind: "aisle-end", idx: activeCapture.idx });
+        return;
+      }
+      setActiveCapture(null);
+      return;
+    }
+    if (activeCapture.kind === "aisle-end") {
+      updateAisle(activeCapture.idx, { endX: x, endY: y });
+      setActiveCapture(null);
+      return;
+    }
+  }
+
+  async function handleGenerateLayout() {
+    if (!layoutReady) return;
+    await bulkLayout.mutateAsync({
+      warehouseId: id,
+      aisles: aisles.map((a) => ({
+        letter: a.letter,
+        bayCount: a.bayCount,
+        levelsPerBay: a.levelsPerBay,
+        positionsPerLevel: a.positionsPerLevel,
+        startX: a.startX!,
+        startY: a.startY!,
+        endX: a.endX!,
+        endY: a.endY!,
+        reverseBayNumbers: a.reverseBayNumbers,
+      })),
+    });
+  }
   const byAisle = useMemo(() => {
     const m: Record<string, typeof racks> = {};
     for (const r of racks) {
@@ -393,7 +541,7 @@ export default function WarehouseDetailPage({
         </Section>
       </Card>
 
-      {warehouse.data?.mapPdfUrl && racks.length > 0 && (
+      {warehouse.data?.mapPdfUrl && (
         <div style={{ marginTop: 20 }}>
           <div
             style={{
@@ -408,6 +556,212 @@ export default function WarehouseDetailPage({
             Map editor
           </div>
           <Card t={t}>
+            {/* LAYOUT SETUP — per-aisle counts + two map pins = entire
+                grid created and placed in one step. Re-runnable; only
+                new codes get created, so you can add aisles later. */}
+            <div
+              style={{
+                fontSize: 11,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+                marginBottom: 10,
+              }}
+            >
+              Define rack layout
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginBottom: 14,
+              }}
+            >
+              {aisles.map((a, idx) => {
+                const startSet = a.startX !== null && a.startY !== null;
+                const endSet = a.endX !== null && a.endY !== null;
+                const capturingStart =
+                  activeCapture?.kind === "aisle-start" &&
+                  activeCapture.idx === idx;
+                const capturingEnd =
+                  activeCapture?.kind === "aisle-end" &&
+                  activeCapture.idx === idx;
+                return (
+                  <div
+                    key={idx}
+                    data-collapse-grid
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "60px 80px 80px 80px 1fr 1fr 28px",
+                      gap: 8,
+                      alignItems: "center",
+                      padding: "8px 10px",
+                      background: t.surfaceAlt,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <TextField
+                      t={t}
+                      value={a.letter}
+                      onChange={(e) =>
+                        updateAisle(idx, {
+                          letter: e.target.value.toUpperCase().slice(0, 3),
+                        })
+                      }
+                      placeholder="A"
+                      style={{ fontFamily: FONTS.mono, textAlign: "center" }}
+                    />
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={a.bayCount}
+                      onChange={(e) =>
+                        updateAisle(idx, { bayCount: Number(e.target.value) })
+                      }
+                      placeholder="bays"
+                    />
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={a.levelsPerBay}
+                      onChange={(e) =>
+                        updateAisle(idx, {
+                          levelsPerBay: Number(e.target.value),
+                        })
+                      }
+                      placeholder="lvls"
+                    />
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={a.positionsPerLevel}
+                      onChange={(e) =>
+                        updateAisle(idx, {
+                          positionsPerLevel: Number(e.target.value),
+                        })
+                      }
+                      placeholder="pos"
+                    />
+                    <Btn
+                      t={t}
+                      type="button"
+                      size="sm"
+                      variant={capturingStart ? "accent" : startSet ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setActiveCapture(
+                          capturingStart
+                            ? null
+                            : { kind: "aisle-start", idx },
+                        )
+                      }
+                    >
+                      {capturingStart
+                        ? "Click map…"
+                        : startSet
+                          ? "Start ✓"
+                          : "Set start"}
+                    </Btn>
+                    <Btn
+                      t={t}
+                      type="button"
+                      size="sm"
+                      variant={capturingEnd ? "accent" : endSet ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setActiveCapture(
+                          capturingEnd
+                            ? null
+                            : { kind: "aisle-end", idx },
+                        )
+                      }
+                    >
+                      {capturingEnd
+                        ? "Click map…"
+                        : endSet
+                          ? "End ✓"
+                          : "Set end"}
+                    </Btn>
+                    <button
+                      type="button"
+                      onClick={() => removeAisle(idx)}
+                      aria-label={`Remove aisle ${a.letter}`}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: `1.5px solid ${t.border}`,
+                        background: "transparent",
+                        color: t.muted,
+                        cursor: "pointer",
+                        fontSize: 14,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <Btn
+                  t={t}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  icon={Ic.Plus}
+                  onClick={addAisle}
+                >
+                  Add aisle
+                </Btn>
+                <Btn
+                  t={t}
+                  type="button"
+                  variant="accent"
+                  size="md"
+                  icon={Ic.Check}
+                  disabled={!layoutReady || bulkLayout.isPending}
+                  onClick={handleGenerateLayout}
+                >
+                  {bulkLayout.isPending
+                    ? "Placing…"
+                    : `Generate & place ${layoutTotal.toLocaleString()}`}
+                </Btn>
+                {bulkLayout.data && (
+                  <span style={{ fontSize: 12, color: t.muted }}>
+                    Created {bulkLayout.data.inserted}/{bulkLayout.data.requested} new.
+                  </span>
+                )}
+              </div>
+              {bulkLayout.error && (
+                <div
+                  style={{
+                    background: t.coralSoft,
+                    color: t.coral,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                >
+                  {bulkLayout.error.message}
+                </div>
+              )}
+            </div>
+
+            <hr
+              style={{
+                border: 0,
+                borderTop: `1px dashed ${t.border}`,
+                margin: "14px 0",
+              }}
+            />
+
+            {/* RE-PIN SINGLE LOCATION — for fixing one code that's in
+                the wrong spot, or pinning manually-added locations. */}
             <div
               style={{
                 display: "flex",
@@ -418,11 +772,19 @@ export default function WarehouseDetailPage({
               }}
             >
               <span style={{ fontSize: 13, color: t.body }}>
-                Location to pin:
+                Re-pin one location:
               </span>
               <select
-                value={activePinId ?? ""}
-                onChange={(e) => setActivePinId(e.target.value || null)}
+                value={
+                  activeCapture?.kind === "location" ? activeCapture.id : ""
+                }
+                onChange={(e) =>
+                  setActiveCapture(
+                    e.target.value
+                      ? { kind: "location", id: e.target.value }
+                      : null,
+                  )
+                }
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
@@ -447,15 +809,16 @@ export default function WarehouseDetailPage({
                     );
                   })}
               </select>
-              {activePinId && (
+              {activeCapture?.kind === "location" && (
                 <Btn
                   t={t}
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    setPin.mutate({ id: activePinId, mapX: null, mapY: null });
-                    setActivePinId(null);
+                    const id = activeCapture.id;
+                    setPin.mutate({ id, mapX: null, mapY: null });
+                    setActiveCapture(null);
                   }}
                 >
                   Clear pin
@@ -468,12 +831,15 @@ export default function WarehouseDetailPage({
             <PdfMapEditor
               pdfUrl={warehouse.data.mapPdfUrl}
               locations={racks}
-              activeLocationId={activePinId}
-              onPlace={(x, y) => {
-                if (!activePinId) return;
-                setPin.mutate({ id: activePinId, mapX: x, mapY: y });
-              }}
-              onPickExisting={(locId) => setActivePinId(locId)}
+              activeLocationId={
+                activeCapture?.kind === "location" ? activeCapture.id : null
+              }
+              captureMode={activeCapture !== null}
+              previewPins={previewPins}
+              onPlace={handleMapPlace}
+              onPickExisting={(locId) =>
+                setActiveCapture({ kind: "location", id: locId })
+              }
             />
           </Card>
         </div>
@@ -620,6 +986,16 @@ function previewCode(a: number, b: number, l: number, p: number) {
   const pp = String(Math.max(1, p)).padStart(2, "0");
   const last = `${lastAisle}-${bb}-${Math.max(1, l)}-${pp}`;
   return { first, last };
+}
+
+function nextAisleLetter(existing: string[]): string {
+  const used = new Set(existing.map((s) => s.toUpperCase()));
+  for (let i = 0; i < 702; i++) {
+    // Supports A..Z, then AA..ZZ (plenty for any warehouse)
+    const candidate = aisleLabel(i);
+    if (!used.has(candidate)) return candidate;
+  }
+  return "A";
 }
 
 function aisleLabel(index: number): string {

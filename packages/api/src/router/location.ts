@@ -144,6 +144,92 @@ export const locationRouter = router({
     }),
 
   /**
+   * Bulk-generate + auto-place. For each aisle the caller specifies
+   * a shape (bayCount, levelsPerBay, positionsPerLevel) and two map
+   * points (startX/Y, endX/Y). Bays are distributed evenly along the
+   * line between those points; levels and positions at the same bay
+   * share the same map coord (they stack vertically in real life).
+   *
+   * Reuses the canonical code format and the ON CONFLICT DO NOTHING
+   * semantics from bulkGenerate, plus writes mapX/mapY on every
+   * newly-created location so the map viewer lights up immediately.
+   *
+   * Existing pinned locations with the same (warehouse, path) key
+   * are NOT overwritten — operator can re-place them individually.
+   */
+  bulkGenerateWithLayout: managerProcedure
+    .input(
+      z.object({
+        warehouseId: z.string().uuid(),
+        aisles: z
+          .array(
+            z.object({
+              letter: z.string().trim().min(1).max(3),
+              bayCount: z.number().int().min(1).max(200),
+              levelsPerBay: z.number().int().min(1).max(20),
+              positionsPerLevel: z.number().int().min(1).max(20),
+              startX: z.number().min(0).max(1),
+              startY: z.number().min(0).max(1),
+              endX: z.number().min(0).max(1),
+              endY: z.number().min(0).max(1),
+              reverseBayNumbers: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const rows: (typeof schema.locations.$inferInsert)[] = [];
+      for (const aisle of input.aisles) {
+        for (let b = 1; b <= aisle.bayCount; b++) {
+          // Fraction along the aisle line, 0 at the first bay and 1
+          // at the last. Single-bay aisles pin at the start point.
+          const tRaw = aisle.bayCount === 1 ? 0 : (b - 1) / (aisle.bayCount - 1);
+          const t = aisle.reverseBayNumbers ? 1 - tRaw : tRaw;
+          const mx = aisle.startX + (aisle.endX - aisle.startX) * t;
+          const my = aisle.startY + (aisle.endY - aisle.startY) * t;
+          for (let level = 1; level <= aisle.levelsPerBay; level++) {
+            for (let pos = 1; pos <= aisle.positionsPerLevel; pos++) {
+              const bb = String(b).padStart(2, "0");
+              const pp = String(pos).padStart(2, "0");
+              const code = `${aisle.letter}-${bb}-${level}-${pp}`;
+              rows.push({
+                organizationId: orgId,
+                warehouseId: input.warehouseId,
+                code,
+                path: code,
+                type: "rack",
+                aisle: aisle.letter,
+                bay: b,
+                level,
+                position: pos,
+                mapX: mx.toString(),
+                mapY: my.toString(),
+              });
+            }
+          }
+        }
+      }
+      if (rows.length === 0) return { inserted: 0 };
+      let inserted = 0;
+      const CHUNK = 500;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const slice = rows.slice(i, i + CHUNK);
+        const result = await ctx.db
+          .insert(schema.locations)
+          .values(slice)
+          .onConflictDoNothing({
+            target: [schema.locations.warehouseId, schema.locations.path],
+          })
+          .returning({ id: schema.locations.id });
+        inserted += result.length;
+      }
+      return { inserted, requested: rows.length };
+    }),
+
+  /**
    * Save pin coordinates for a location on the warehouse map PDF.
    * Phase 2 feature — users drag/drop a marker on the viewer.
    */
