@@ -17,10 +17,16 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
   const utils = trpc.useUtils();
   const detail = trpc.outbound.byId.useQuery({ id });
   const genPicks = trpc.outbound.generatePicks.useMutation({
-    onSuccess: () => utils.outbound.byId.invalidate({ id }),
+    onSuccess: () => {
+      utils.outbound.byId.invalidate({ id });
+      utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
+    },
   });
   const cancelOrder = trpc.outbound.cancel.useMutation({
-    onSuccess: () => utils.outbound.byId.invalidate({ id }),
+    onSuccess: () => {
+      utils.outbound.byId.invalidate({ id });
+      utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
+    },
   });
   const pack = trpc.outbound.pack.useMutation({
     onSuccess: () => utils.outbound.byId.invalidate({ id }),
@@ -29,6 +35,7 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
     onSuccess: () => {
       utils.outbound.byId.invalidate({ id });
       utils.outbound.shipments.invalidate({ outboundOrderId: id });
+      utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
     },
   });
   const shipmentsQ = trpc.outbound.shipments.useQuery({ outboundOrderId: id });
