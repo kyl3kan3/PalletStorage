@@ -137,7 +137,7 @@ export function nextOutboundStep(
         : {
             label: "Finish picking",
             blurb:
-              "Your team still has open picks. Head to My Tasks to finish them, or reassign unassigned ones from the Tasks page.",
+              "Generated picks need confirming. Scroll to the Picks section below, pick a staging location for each, and click Done.",
             tone: "neutral",
           };
     case "packed":

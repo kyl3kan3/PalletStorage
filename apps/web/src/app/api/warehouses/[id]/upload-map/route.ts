@@ -74,14 +74,31 @@ export async function POST(
   }
 
   const localUrl = `/api/warehouses/${warehouseId}/map?v=${Date.now()}`;
-  await db
-    .update(schema.warehouses)
-    .set({
-      mapPdfData: bytes,
-      mapPdfFilename: file.name,
-      mapPdfUrl: localUrl,
-    })
-    .where(eq(schema.warehouses.id, warehouseId));
+  try {
+    await db
+      .update(schema.warehouses)
+      .set({
+        mapPdfData: bytes,
+        mapPdfFilename: file.name,
+        mapPdfUrl: localUrl,
+      })
+      .where(eq(schema.warehouses.id, warehouseId));
+  } catch (e) {
+    // The most common failure here is "column map_pdf_data does not
+    // exist" — i.e. the user hasn't run migration 0012 yet. Surface
+    // that as a readable error instead of a generic 500.
+    const msg = e instanceof Error ? e.message : "unknown DB error";
+    if (msg.includes("map_pdf_data") && msg.toLowerCase().includes("does not exist")) {
+      return NextResponse.json(
+        {
+          error:
+            "DB column map_pdf_data is missing. Run migration 0012 in Neon: ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS map_pdf_data bytea; ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS map_pdf_filename text;",
+        },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   return NextResponse.json({ url: localUrl, filename: file.name });
 }
