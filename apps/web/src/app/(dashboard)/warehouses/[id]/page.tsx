@@ -49,6 +49,7 @@ export default function WarehouseDetailPage({
   const [mapUrl, setMapUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [uploadOk, setUploadOk] = useState<string | null>(null);
   // Prime the URL field only when it's an EXTERNAL URL the user
   // pasted — the local /api/... route we set after an upload isn't
   // meaningful for the user to edit, so leave the field blank then.
@@ -62,20 +63,30 @@ export default function WarehouseDetailPage({
 
   async function handleUploadFile(file: File) {
     setUploadErr(null);
+    setUploadOk(null);
     setUploading(true);
     try {
       const body = new FormData();
       body.append("file", file);
+      console.log("[upload-map] POST", file.name, file.size, "bytes");
       const res = await fetch(`/api/warehouses/${id}/upload-map`, {
         method: "POST",
         body,
       });
+      const raw = await res.text();
+      console.log("[upload-map] response", res.status, raw);
       if (!res.ok) {
-        const payload = (await res.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(payload?.error ?? `Upload failed (${res.status})`);
+        let msg = `Upload failed (${res.status})`;
+        try {
+          const parsed = JSON.parse(raw) as { error?: string };
+          if (parsed.error) msg = parsed.error;
+        } catch {
+          // Server returned non-JSON (HTML error page, empty body, etc.)
+          if (raw.length > 0 && raw.length < 400) msg += `: ${raw}`;
+        }
+        throw new Error(msg);
       }
+      setUploadOk(`Uploaded ${file.name} (${Math.round(file.size / 1024)}KB).`);
       await utils.warehouse.byId.invalidate({ id });
     } catch (e) {
       setUploadErr(e instanceof Error ? e.message : "Upload failed");
@@ -299,12 +310,28 @@ export default function WarehouseDetailPage({
                 marginBottom: 10,
                 background: t.coralSoft,
                 color: t.coral,
-                padding: "8px 12px",
-                borderRadius: 8,
-                fontSize: 12,
+                padding: "10px 14px",
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 500,
               }}
             >
               {uploadErr}
+            </div>
+          )}
+          {uploadOk && !uploadErr && (
+            <div
+              style={{
+                marginBottom: 10,
+                background: t.mintSoft ?? t.primarySoft,
+                color: t.ink,
+                padding: "10px 14px",
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              ✓ {uploadOk}
             </div>
           )}
 
