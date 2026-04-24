@@ -37,6 +37,7 @@ export default function WarehouseDetailPage({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
   const detect = trpc.location.detectAislesFromMap.useMutation();
+  const [detectHint, setDetectHint] = useState("");
   const setMap = trpc.warehouse.setMapPdfUrl.useMutation({
     onSuccess: () => utils.warehouse.byId.invalidate({ id }),
   });
@@ -299,6 +300,7 @@ export default function WarehouseDetailPage({
     const result = await detect.mutateAsync({
       warehouseId: id,
       imageDataUrl,
+      userHint: detectHint.trim() || undefined,
     });
     // Merge detected aisles into existing drafts. If an aisle with
     // the same letter is already in the list we update its bayCount
@@ -887,6 +889,44 @@ export default function WarehouseDetailPage({
                   >
                     {detect.isPending ? "Detecting…" : "Detect from PDF"}
                   </Btn>
+                )}
+                {warehouse.data?.mapPdfUrl && (
+                  <details>
+                    <summary
+                      style={{
+                        fontSize: 11,
+                        color: t.muted,
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Hint for the model
+                    </summary>
+                    <div style={{ marginTop: 6, width: 320, maxWidth: "100%" }}>
+                      <textarea
+                        value={detectHint}
+                        onChange={(e) => setDetectHint(e.target.value)}
+                        placeholder="e.g. Aisles are the long horizontal rectangles labeled A-F on the left. Bays are the vertical tick marks inside each rectangle."
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: t.surfaceAlt,
+                          border: `1.5px solid ${t.border}`,
+                          fontFamily: FONTS.sans,
+                          fontSize: 12,
+                          color: t.ink,
+                          resize: "vertical",
+                        }}
+                      />
+                      <div style={{ fontSize: 11, color: t.muted, marginTop: 4 }}>
+                        Tells the vision model how racking is drawn in your
+                        specific PDF — biggest accuracy boost when the
+                        drawing uses a non-standard convention.
+                      </div>
+                    </div>
+                  </details>
                 )}
                 <Btn
                   t={t}

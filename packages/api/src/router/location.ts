@@ -299,6 +299,13 @@ export const locationRouter = router({
         imageDataUrl: z
           .string()
           .regex(/^data:image\/(png|jpeg);base64,/, "Expected a PNG/JPEG data URL"),
+        /** Free-text hint describing how racking is drawn in this
+         * specific PDF. Example: "Aisles are the long horizontal
+         * rectangles labeled A-F. Bays are the small vertical lines
+         * inside each rectangle." Drastically improves accuracy
+         * because rack drawings vary widely between architectural
+         * conventions. */
+        userHint: z.string().trim().max(1000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -328,17 +335,23 @@ export const locationRouter = router({
       }
 
       const prompt = [
-        "You are analyzing a warehouse floor plan image. Do NOT invent a typical layout — look at the actual pixels and describe what is drawn.",
-        "A rack aisle shows as a long thin rectangle (or a pair of parallel rectangles) in the drawing, usually with a letter or number label next to it. Bays are the divisions you can see between uprights along that rectangle.",
+        "You are analyzing a warehouse floor plan image.",
+        input.userHint
+          ? `The person who uploaded this drawing told you: """${input.userHint.replace(/"/g, "'")}""". Use this as your primary guide — they know how their drawing was made.`
+          : "",
+        "Floor plans vary widely. Racking can show as: parallel double-lines, thick filled rectangles, hatched rectangles, narrow rectangles with vertical tick marks for bays, or even just labeled regions. Look at this specific image carefully — don't assume any single convention.",
+        "Identify every rack aisle (a continuous run of pallet racking).",
         "STRICT RULES:",
-        "1. If the image does NOT clearly show rack racking (e.g. it's just an outline, or a blank office layout, or an abstract grid with no identifiable rack runs), return {\"aisles\":[],\"notes\":\"<one-sentence reason>\"} — do not guess a 'plausible' layout.",
-        "2. If you can see racking but can't count bays reliably, omit bayCount for that aisle.",
-        "3. If you can see racking but can't estimate position confidently, omit the coord fields — the UI will fall back to manual pinning.",
-        "4. Coord system: (0,0)=top-left, (1,1)=bottom-right, as fractions of the image. startX/Y is the center of the first bay, endX/Y is the center of the last bay along the actual aisle line.",
-        "5. In `notes`, briefly describe what you actually saw — e.g. 'Six horizontal rack runs labeled A-F, each ~20 bays, aisle labels on the left side' or 'Floor plan shows only a perimeter outline, no racking visible'. Keep it one or two sentences.",
+        "1. If after careful inspection you genuinely don't see any rack runs, return {\"aisles\":[],\"notes\":\"<what you DID see in detail — describe shapes, labels, lines, regions>\"} so the user can give you better hints next time.",
+        "2. If you see candidates but you're unsure they're racking, INCLUDE them anyway and explain in notes — better to surface a guess the user can dismiss than to bail.",
+        "3. For each aisle return: letter, bayCount (estimated divisions along the run), startX/Y (center of first bay, 0-1 of image), endX/Y (center of last bay, 0-1 of image).",
+        "4. Coord system: (0,0)=top-left, (1,1)=bottom-right.",
+        "5. In `notes`, describe what you saw in 1-3 sentences — what the racking looks like in this specific drawing, where labels appear, what's NOT racking, anything ambiguous. This is your back-channel to the user.",
         'Return minified JSON: {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}],"notes":"..."}.',
         "No prose, no markdown, no code fences — just the JSON.",
-      ].join(" ");
+      ]
+        .filter(Boolean)
+        .join(" ");
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
