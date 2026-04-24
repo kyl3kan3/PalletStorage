@@ -3,8 +3,9 @@
 import { use, useMemo, useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, TextField } from "~/components/kit";
+import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { PdfMapEditor } from "~/components/pdf-map-editor";
 
 /**
  * Warehouse detail page. Three responsibilities:
@@ -35,6 +36,10 @@ export default function WarehouseDetailPage({
   const setMap = trpc.warehouse.setMapPdfUrl.useMutation({
     onSuccess: () => utils.warehouse.byId.invalidate({ id }),
   });
+  const setPin = trpc.location.setMapPosition.useMutation({
+    onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
+  });
+  const [activePinId, setActivePinId] = useState<string | null>(null);
 
   const [aisleCount, setAisleCount] = useState(6);
   const [baysPerAisle, setBaysPerAisle] = useState(20);
@@ -234,27 +239,94 @@ export default function WarehouseDetailPage({
               {setMap.error.message}
             </div>
           )}
-          {warehouse.data?.mapPdfUrl && (
-            <div style={{ marginTop: 14 }}>
-              <iframe
-                src={warehouse.data.mapPdfUrl}
-                title="Warehouse floor map"
-                style={{
-                  width: "100%",
-                  height: 500,
-                  border: `1.5px solid ${t.border}`,
-                  borderRadius: 12,
-                  background: t.surfaceAlt,
-                }}
-              />
-              <div style={{ fontSize: 11, color: t.muted, marginTop: 6 }}>
-                Preview — if nothing renders, the URL isn&apos;t publicly
-                reachable or the host blocks embedding.
-              </div>
-            </div>
-          )}
         </Section>
       </Card>
+
+      {warehouse.data?.mapPdfUrl && racks.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: t.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              fontWeight: 600,
+              marginBottom: 10,
+            }}
+          >
+            Map editor
+          </div>
+          <Card t={t}>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: 14,
+              }}
+            >
+              <span style={{ fontSize: 13, color: t.body }}>
+                Location to pin:
+              </span>
+              <select
+                value={activePinId ?? ""}
+                onChange={(e) => setActivePinId(e.target.value || null)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  background: t.surfaceAlt,
+                  border: `1.5px solid ${t.border}`,
+                  fontSize: 13,
+                  color: t.ink,
+                  fontFamily: FONTS.mono,
+                  minWidth: 160,
+                }}
+              >
+                <option value="">— select —</option>
+                {racks
+                  .slice()
+                  .sort((x, y) => (x.code ?? "").localeCompare(y.code ?? ""))
+                  .map((r) => {
+                    const pinned = r.mapX !== null && r.mapY !== null;
+                    return (
+                      <option key={r.id} value={r.id}>
+                        {r.code} {pinned ? "●" : ""}
+                      </option>
+                    );
+                  })}
+              </select>
+              {activePinId && (
+                <Btn
+                  t={t}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setPin.mutate({ id: activePinId, mapX: null, mapY: null });
+                    setActivePinId(null);
+                  }}
+                >
+                  Clear pin
+                </Btn>
+              )}
+              <Tag t={t} tone="neutral">
+                {racks.filter((r) => r.mapX !== null).length}/{racks.length} pinned
+              </Tag>
+            </div>
+            <PdfMapEditor
+              pdfUrl={warehouse.data.mapPdfUrl}
+              locations={racks}
+              activeLocationId={activePinId}
+              onPlace={(x, y) => {
+                if (!activePinId) return;
+                setPin.mutate({ id: activePinId, mapX: x, mapY: y });
+              }}
+              onPickExisting={(locId) => setActivePinId(locId)}
+            />
+          </Card>
+        </div>
+      )}
 
       {Object.keys(byAisle).length > 0 && (
         <div style={{ marginTop: 20 }}>
@@ -308,22 +380,38 @@ export default function WarehouseDetailPage({
                         .sort((x, y) =>
                           (x.code ?? "").localeCompare(y.code ?? ""),
                         )
-                        .map((r) => (
-                          <span
-                            key={r.id}
-                            style={{
-                              fontFamily: FONTS.mono,
-                              fontSize: 11.5,
-                              color: t.body,
-                              padding: "4px 6px",
-                              borderRadius: 6,
-                              background: t.surfaceAlt,
-                              textAlign: "center",
-                            }}
-                          >
-                            {r.code}
-                          </span>
-                        ))}
+                        .map((r) => {
+                          const pinned = r.mapX !== null && r.mapY !== null;
+                          return (
+                            <span
+                              key={r.id}
+                              style={{
+                                fontFamily: FONTS.mono,
+                                fontSize: 11.5,
+                                color: t.body,
+                                padding: "4px 6px",
+                                borderRadius: 6,
+                                background: pinned ? t.primarySoft : t.surfaceAlt,
+                                textAlign: "center",
+                                position: "relative",
+                              }}
+                              title={pinned ? "Pinned on map" : "Not pinned"}
+                            >
+                              {r.code}
+                              {pinned && (
+                                <span
+                                  style={{
+                                    marginLeft: 3,
+                                    color: t.primaryDeep,
+                                    fontSize: 10,
+                                  }}
+                                >
+                                  ●
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
                     </div>
                   </Card>
                 );
