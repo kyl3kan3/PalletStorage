@@ -24,6 +24,8 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const updateLine = trpc.inbound.updateLine.useMutation({ onSuccess: invalidate });
   const addLine = trpc.inbound.addLine.useMutation({ onSuccess: invalidate });
   const removeLine = trpc.inbound.removeLine.useMutation({ onSuccess: invalidate });
+  const createPallet = trpc.pallet.create.useMutation();
+  const receiveLine = trpc.inbound.receiveLine.useMutation({ onSuccess: invalidate });
 
   const exportInbound = trpc.quickbooks.exportInbound.useMutation();
   const qbStatus = trpc.quickbooks.status.useQuery();
@@ -101,6 +103,38 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const [addProductId, setAddProductId] = useState("");
   const [addQty, setAddQty] = useState(1);
   const [addQtyUnit, setAddQtyUnit] = useState<"each" | "case" | "pallet">("each");
+
+  // Inline "receive" state — tracks which line is currently being
+  // received on, plus the in-flight qty/lot/expiry the user is typing.
+  const [receivingLineId, setReceivingLineId] = useState<string | null>(null);
+  const [receiveQty, setReceiveQty] = useState(1);
+  const [receiveLot, setReceiveLot] = useState("");
+  const [receiveExpiry, setReceiveExpiry] = useState("");
+  const [receiveErr, setReceiveErr] = useState<string | null>(null);
+
+  async function handleReceive(lineId: string) {
+    if (!order) return;
+    setReceiveErr(null);
+    try {
+      const pallet = await createPallet.mutateAsync({
+        warehouseId: order.warehouseId,
+      });
+      if (!pallet) throw new Error("Failed to create pallet");
+      await receiveLine.mutateAsync({
+        inboundLineId: lineId,
+        palletId: pallet.id,
+        qty: receiveQty,
+        lot: receiveLot.trim() || undefined,
+        expiry: receiveExpiry ? new Date(receiveExpiry) : undefined,
+      });
+      setReceivingLineId(null);
+      setReceiveQty(1);
+      setReceiveLot("");
+      setReceiveExpiry("");
+    } catch (e) {
+      setReceiveErr(e instanceof Error ? e.message : "Receive failed");
+    }
+  }
 
   const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
   const status = order?.status ?? "…";
@@ -288,7 +322,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               display: "grid",
               gridTemplateColumns: editing
                 ? "60px 1.4fr 100px 120px 140px 32px"
-                : "60px 1.4fr 100px 120px 140px",
+                : "60px 1.4fr 100px 120px 140px 120px",
               gap: 16,
               padding: "14px 20px",
               fontSize: 11,
@@ -303,19 +337,22 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
             <div>Expected</div>
             <div>Received</div>
             <div>Variance</div>
-            {editing && <div />}
+            <div />
           </div>
 
           {lines.map((l, i) => {
             const v = l.qtyReceived - l.qtyExpected;
+            const remaining = Math.max(0, l.qtyExpected - l.qtyReceived);
+            const canReceive = !isTerminal && remaining > 0;
+            const isReceivingThis = receivingLineId === l.id;
             return (
+              <div key={l.id}>
               <div
-                key={l.id}
                 style={{
                   display: "grid",
                   gridTemplateColumns: editing
                     ? "60px 1.4fr 100px 120px 140px 32px"
-                    : "60px 1.4fr 100px 120px 140px",
+                    : "60px 1.4fr 100px 120px 140px 120px",
                   gap: 16,
                   padding: "12px 20px",
                   alignItems: "center",
@@ -388,6 +425,147 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                     ×
                   </button>
                 )}
+                {!editing && (
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    {canReceive ? (
+                      <Btn
+                        t={t}
+                        type="button"
+                        variant={isReceivingThis ? "ghost" : "primary"}
+                        size="sm"
+                        icon={isReceivingThis ? undefined : Ic.Plus}
+                        onClick={() => {
+                          if (isReceivingThis) {
+                            setReceivingLineId(null);
+                          } else {
+                            setReceivingLineId(l.id);
+                            setReceiveQty(remaining || 1);
+                            setReceiveLot("");
+                            setReceiveExpiry("");
+                            setReceiveErr(null);
+                          }
+                        }}
+                      >
+                        {isReceivingThis ? "Cancel" : "Receive"}
+                      </Btn>
+                    ) : (
+                      <span style={{ fontSize: 11, color: t.muted }}>
+                        {isTerminal ? "—" : "done"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {isReceivingThis && (
+                <div
+                  data-no-grid-min
+                  style={{
+                    padding: "14px 20px 16px",
+                    borderTop: `1.5px dashed ${t.border}`,
+                    background: t.surfaceAlt,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 10,
+                    alignItems: "flex-end",
+                  }}
+                >
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: t.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Qty received
+                    </span>
+                    <TextField
+                      t={t}
+                      type="number"
+                      min={1}
+                      value={receiveQty}
+                      onChange={(e) => setReceiveQty(Number(e.target.value))}
+                      style={{ width: 100 }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: t.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Lot (optional)
+                    </span>
+                    <TextField
+                      t={t}
+                      value={receiveLot}
+                      onChange={(e) => setReceiveLot(e.target.value)}
+                      placeholder="e.g. LOT-2026-04"
+                      style={{ width: 160 }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: t.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Expiry (optional)
+                    </span>
+                    <TextField
+                      t={t}
+                      type="date"
+                      value={receiveExpiry}
+                      onChange={(e) => setReceiveExpiry(e.target.value)}
+                    />
+                  </label>
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="accent"
+                    size="md"
+                    icon={Ic.Check}
+                    disabled={
+                      receiveQty < 1 ||
+                      createPallet.isPending ||
+                      receiveLine.isPending
+                    }
+                    onClick={() => handleReceive(l.id)}
+                  >
+                    {createPallet.isPending || receiveLine.isPending
+                      ? "Saving…"
+                      : "Confirm receive"}
+                  </Btn>
+                  <span style={{ fontSize: 11, color: t.muted }}>
+                    A new pallet (LPN auto-assigned) will be created with this
+                    product and qty.
+                  </span>
+                  {receiveErr && (
+                    <div
+                      style={{
+                        width: "100%",
+                        background: t.coralSoft,
+                        color: t.coral,
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      {receiveErr}
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
             );
           })}
