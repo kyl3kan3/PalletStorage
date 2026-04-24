@@ -215,6 +215,8 @@ ALTER TABLE "inbound_orders" ADD COLUMN IF NOT EXISTS "supplier_id" uuid
   REFERENCES "suppliers"("id") ON DELETE SET NULL;
 ALTER TABLE "inbound_orders" ADD COLUMN IF NOT EXISTS "customer_id" uuid
   REFERENCES "customers"("id") ON DELETE SET NULL;
+ALTER TABLE "inbound_orders" ADD COLUMN IF NOT EXISTS "receiving_location_id" uuid
+  REFERENCES "locations"("id") ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "inbound_org_ref_uq" ON "inbound_orders" ("organization_id", "reference");
 
 CREATE TABLE IF NOT EXISTS "inbound_lines" (
