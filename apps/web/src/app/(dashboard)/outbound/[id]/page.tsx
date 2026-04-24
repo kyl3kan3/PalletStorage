@@ -121,6 +121,21 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   {pack.isPending ? "Marking packed…" : "Mark packed"}
                 </Btn>
               ) : null}
+              {status === "picking" && !allLinesPicked ? (
+                <Btn
+                  t={t}
+                  variant="accent"
+                  size="md"
+                  icon={Ic.Arrow}
+                  onClick={() =>
+                    document
+                      .getElementById("picks-section")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
+                >
+                  Complete picks
+                </Btn>
+              ) : null}
               {status === "packed" ? (
                 <>
                   <TextField
@@ -226,7 +241,7 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
           confirm each pick as it's pulled from its source location.
           Completed picks stay visible to give the closer a full trail. */}
       {picksQ.data && picksQ.data.length > 0 && (
-        <div style={{ marginTop: 20 }}>
+        <div id="picks-section" style={{ marginTop: 20, scrollMarginTop: 80 }}>
           <div
             style={{
               fontSize: 11,

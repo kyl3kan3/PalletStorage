@@ -114,6 +114,13 @@ export const Ic = {
     </>,
   ),
   Filter: mk(<path d="M3 5h18l-7 9v5l-4 2v-7z" />),
+  Upload: mk(
+    <>
+      <path d="M12 21V9" />
+      <path d="M7 12l5-5 5 5" />
+      <path d="M5 21h14" />
+    </>,
+  ),
   Download: mk(
     <>
       <path d="M12 3v12" />

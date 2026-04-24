@@ -406,3 +406,7 @@ ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "position" integer;
 ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "map_x" numeric(10,3);
 ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "map_y" numeric(10,3);
 ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_url" text;
+
+-- 0012_warehouse_map_upload: allow PDF uploads stored inline.
+ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_data" bytea;
+ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_filename" text;

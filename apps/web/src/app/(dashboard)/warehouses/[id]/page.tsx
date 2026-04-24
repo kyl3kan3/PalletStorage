@@ -47,12 +47,42 @@ export default function WarehouseDetailPage({
   const [positionsPerLevel, setPositionsPerLevel] = useState(2);
 
   const [mapUrl, setMapUrl] = useState("");
-  // Prime the field once the warehouse loads so the user sees the
-  // existing URL (if any) and can edit it in place.
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  // Prime the URL field only when it's an EXTERNAL URL the user
+  // pasted — the local /api/... route we set after an upload isn't
+  // meaningful for the user to edit, so leave the field blank then.
   useMemo(() => {
-    if (warehouse.data?.mapPdfUrl && mapUrl === "") setMapUrl(warehouse.data.mapPdfUrl);
+    const existing = warehouse.data?.mapPdfUrl;
+    if (existing && !existing.startsWith("/api/") && mapUrl === "") {
+      setMapUrl(existing);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warehouse.data?.mapPdfUrl]);
+
+  async function handleUploadFile(file: File) {
+    setUploadErr(null);
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(`/api/warehouses/${id}/upload-map`, {
+        method: "POST",
+        body,
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(payload?.error ?? `Upload failed (${res.status})`);
+      }
+      await utils.warehouse.byId.invalidate({ id });
+    } catch (e) {
+      setUploadErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const racks = locations.data?.filter((l) => l.type === "rack") ?? [];
   const byAisle = useMemo(() => {
@@ -196,35 +226,129 @@ export default function WarehouseDetailPage({
 
         <Section title="Floor map (PDF)">
           <p style={{ fontSize: 13.5, color: t.body, margin: "0 0 14px" }}>
-            Paste a URL to a PDF of this warehouse&apos;s floor plan. Any
-            publicly-reachable URL works (Google Drive share, Dropbox, your
-            own hosting). Phase 2 of this feature will let you click a spot
-            on the PDF to pin a location there.
+            Upload a PDF of this warehouse&apos;s floor plan (max 4MB) or,
+            for larger files, paste a public URL. Once a map is attached,
+            use the Map editor below to click where each rack sits.
           </p>
+
           <div
-            data-collapse-grid
-            style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}
           >
-            <TextField
-              t={t}
-              value={mapUrl}
-              onChange={(e) => setMapUrl(e.target.value)}
-              placeholder="https://…/floor-plan.pdf"
-            />
-            <Btn
-              t={t}
-              type="button"
-              variant="accent"
-              size="md"
-              icon={Ic.Check}
-              disabled={setMap.isPending}
-              onClick={() =>
-                setMap.mutate({ id, url: mapUrl.trim() || null })
-              }
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 14px",
+                borderRadius: 12,
+                background: t.primary,
+                color: t.primaryText,
+                border: `1.5px solid ${t.primary}`,
+                fontSize: 13.5,
+                fontWeight: 600,
+                fontFamily: FONTS.sans,
+                cursor: uploading ? "progress" : "pointer",
+                opacity: uploading ? 0.6 : 1,
+              }}
             >
-              {setMap.isPending ? "Saving…" : "Save map URL"}
-            </Btn>
+              <Ic.Upload size={16} />
+              {uploading ? "Uploading…" : "Upload PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUploadFile(f);
+                  // Reset so the same file can be re-selected if needed.
+                  e.target.value = "";
+                }}
+                style={{ display: "none" }}
+              />
+            </label>
+            {warehouse.data?.mapPdfFilename && (
+              <span style={{ fontSize: 12, color: t.muted }}>
+                Current: {warehouse.data.mapPdfFilename}
+              </span>
+            )}
+            {warehouse.data?.mapPdfUrl && (
+              <Btn
+                t={t}
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setMap.mutate({ id, url: null });
+                  setMapUrl("");
+                }}
+                disabled={setMap.isPending}
+              >
+                Clear map
+              </Btn>
+            )}
           </div>
+          {uploadErr && (
+            <div
+              style={{
+                marginBottom: 10,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {uploadErr}
+            </div>
+          )}
+
+          <details style={{ marginTop: 6 }}>
+            <summary
+              style={{
+                fontSize: 12,
+                color: t.muted,
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Or paste an external URL instead
+            </summary>
+            <div
+              data-collapse-grid
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto",
+                gap: 10,
+                marginTop: 10,
+              }}
+            >
+              <TextField
+                t={t}
+                value={mapUrl}
+                onChange={(e) => setMapUrl(e.target.value)}
+                placeholder="https://…/floor-plan.pdf"
+              />
+              <Btn
+                t={t}
+                type="button"
+                variant="secondary"
+                size="md"
+                icon={Ic.Check}
+                disabled={setMap.isPending}
+                onClick={() =>
+                  setMap.mutate({ id, url: mapUrl.trim() || null })
+                }
+              >
+                {setMap.isPending ? "Saving…" : "Save URL"}
+              </Btn>
+            </div>
+          </details>
           {setMap.error && (
             <div
               style={{

@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -121,7 +122,19 @@ export const warehouses = pgTable(
     timezone: text("timezone").notNull().default("UTC"),
     // URL to a PDF map of the warehouse floor. Phase 2 renders it in a
     // viewer so operators can click a location to assign it to a spot.
+    // Can be an external URL the user pasted, or a local route like
+    // /api/warehouses/<id>/map that serves mapPdfData below.
     mapPdfUrl: text("map_pdf_url"),
+    // Raw bytes of an uploaded PDF. Stored in-DB so we don't need an
+    // external blob store for the happy path (floor plans are small —
+    // usually 1-3MB). mapPdfFilename preserves the original filename
+    // so downloads retain it.
+    mapPdfData: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType() {
+        return "bytea";
+      },
+    })("map_pdf_data"),
+    mapPdfFilename: text("map_pdf_filename"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
