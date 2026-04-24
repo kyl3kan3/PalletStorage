@@ -245,10 +245,12 @@ export default function WarehouseDetailPage({
     pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
     const doc = await pdfjs.getDocument({ url: warehouse.data.mapPdfUrl }).promise;
     const page = await doc.getPage(1);
-    // Cap the longest edge at 1600px — plenty of detail for vision
-    // while keeping the base64 payload well under the tRPC body limit.
+    // Render the floor plan at higher resolution than the in-page
+    // viewer so the vision model has enough detail to read rack
+    // uprights and aisle labels. Cap the longest edge at 2400px —
+    // base64 payload still lands well under the tRPC body limit.
     const vp1 = page.getViewport({ scale: 1 });
-    const scale = Math.min(1600 / Math.max(vp1.width, vp1.height), 2);
+    const scale = Math.min(2400 / Math.max(vp1.width, vp1.height), 3);
     const vp = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = vp.width;
@@ -256,7 +258,9 @@ export default function WarehouseDetailPage({
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D unavailable");
     await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-    const imageDataUrl = canvas.toDataURL("image/png");
+    // JPEG at quality 0.9 is much smaller than PNG for line-art with
+    // anti-aliased edges, and vision accepts both.
+    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.9);
 
     const result = await detect.mutateAsync({
       warehouseId: id,
@@ -847,6 +851,24 @@ export default function WarehouseDetailPage({
                   );
                 })()}
               </div>
+              {detect.data?.notes && (
+                <div
+                  style={{
+                    background: t.surfaceAlt,
+                    border: `1.5px dashed ${t.border}`,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: t.body,
+                    fontStyle: "italic",
+                  }}
+                >
+                  <span style={{ fontWeight: 600, fontStyle: "normal" }}>
+                    Vision notes:
+                  </span>{" "}
+                  {detect.data.notes}
+                </div>
+              )}
               {detect.error && (
                 <div
                   style={{

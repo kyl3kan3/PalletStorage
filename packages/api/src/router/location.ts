@@ -328,14 +328,15 @@ export const locationRouter = router({
       }
 
       const prompt = [
-        "You are analyzing a warehouse floor plan.",
-        "Identify every rack aisle (a long run of pallet racking, usually labeled A, B, C, …).",
-        "For each aisle, estimate how many bays it has (a bay is one column of racking between uprights, usually 3-10 ft wide).",
-        "Also return pixel-normalized coordinates for where each aisle's FIRST bay sits (startX, startY) and where its LAST bay sits (endX, endY).",
-        "Use 0-1 fractions of the image: (0,0) is top-left, (1,1) is bottom-right. startX/Y and endX/Y should land on the centers of the end bays along the aisle's actual geometry — horizontal aisles will have nearly-equal startY/endY, vertical aisles will have nearly-equal startX/endX.",
-        "Ignore docks, office areas, and non-rack storage.",
-        'Return ONLY minified JSON in the shape {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}]}.',
-        "If you genuinely can't place an aisle, omit the coord fields for it; the UI will fall back to manual pinning.",
+        "You are analyzing a warehouse floor plan image. Do NOT invent a typical layout — look at the actual pixels and describe what is drawn.",
+        "A rack aisle shows as a long thin rectangle (or a pair of parallel rectangles) in the drawing, usually with a letter or number label next to it. Bays are the divisions you can see between uprights along that rectangle.",
+        "STRICT RULES:",
+        "1. If the image does NOT clearly show rack racking (e.g. it's just an outline, or a blank office layout, or an abstract grid with no identifiable rack runs), return {\"aisles\":[],\"notes\":\"<one-sentence reason>\"} — do not guess a 'plausible' layout.",
+        "2. If you can see racking but can't count bays reliably, omit bayCount for that aisle.",
+        "3. If you can see racking but can't estimate position confidently, omit the coord fields — the UI will fall back to manual pinning.",
+        "4. Coord system: (0,0)=top-left, (1,1)=bottom-right, as fractions of the image. startX/Y is the center of the first bay, endX/Y is the center of the last bay along the actual aisle line.",
+        "5. In `notes`, briefly describe what you actually saw — e.g. 'Six horizontal rack runs labeled A-F, each ~20 bays, aisle labels on the left side' or 'Floor plan shows only a perimeter outline, no racking visible'. Keep it one or two sentences.",
+        'Return minified JSON: {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}],"notes":"..."}.',
         "No prose, no markdown, no code fences — just the JSON.",
       ].join(" ");
 
@@ -387,6 +388,7 @@ export const locationRouter = router({
         endX?: number;
         endY?: number;
       }> = [];
+      let notes = "";
       try {
         const parsed = JSON.parse(content) as {
           aisles?: Array<{
@@ -397,7 +399,9 @@ export const locationRouter = router({
             endX?: unknown;
             endY?: unknown;
           }>;
+          notes?: unknown;
         };
+        if (typeof parsed.notes === "string") notes = parsed.notes;
         aisles = (parsed.aisles ?? [])
           .map((a) => ({
             letter:
@@ -417,7 +421,7 @@ export const locationRouter = router({
       } catch {
         aisles = parseAislesFromText(content);
       }
-      return { aisles };
+      return { aisles, notes };
     }),
 
   /**
