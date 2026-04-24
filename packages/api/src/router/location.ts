@@ -353,7 +353,10 @@ export const locationRouter = router({
         targetUrl = wh.mapPdfUrl;
       }
 
-      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      // Firecrawl v2: no `parsers` option — the API sniffs the
+      // Content-Type and parses PDFs automatically when the URL
+      // resolves to one. Just request markdown and trust the pipeline.
+      const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -362,7 +365,6 @@ export const locationRouter = router({
         body: JSON.stringify({
           url: targetUrl,
           formats: ["markdown"],
-          parsers: ["pdf"],
         }),
       });
       if (!res.ok) {
