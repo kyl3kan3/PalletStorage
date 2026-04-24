@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
@@ -45,7 +45,14 @@ export const taskRouter = router({
       .where(
         and(
           eq(schema.picks.organizationId, orgId),
-          eq(schema.picks.assignedUserId, user.id),
+          // Also surface unassigned picks so operators see the
+          // unclaimed backlog alongside their own work — otherwise
+          // picks generated before auto-assignment landed are
+          // invisible to everyone.
+          or(
+            eq(schema.picks.assignedUserId, user.id),
+            isNull(schema.picks.assignedUserId),
+          ),
           isNull(schema.picks.completedAt),
         ),
       )

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
+import { createHmac } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLocationCode } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
@@ -15,6 +17,53 @@ function formatRackCode(aisle: string, bay: number, level: number, position: num
   const bb = String(bay).padStart(2, "0");
   const pp = String(position).padStart(2, "0");
   return `${aisle}-${bb}-${level}-${pp}`;
+}
+
+/**
+ * Very fragile best-effort parser for what Firecrawl extracts from a
+ * floor-plan PDF. We look for two common signals:
+ *
+ *   1. "Aisle A", "Aisle B", ... headings → aisle letters only
+ *   2. Code-like tokens "A1", "A01", "B-12", "C03" → aisle letter +
+ *      max bay number seen
+ *
+ * Returns {letter, bayCount?} per detected aisle. The caller shows
+ * these as suggestions; user still reviews/edits before generating.
+ */
+function parseAislesFromText(text: string): Array<{ letter: string; bayCount?: number }> {
+  const aisleMaxBay = new Map<string, number>();
+
+  // Pattern 1: "Aisle A" / "AISLE B"
+  const aisleMentionRx = /\baisle\s+([A-Z]{1,3})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = aisleMentionRx.exec(text)) !== null) {
+    const letter = m[1]!.toUpperCase();
+    if (!aisleMaxBay.has(letter)) aisleMaxBay.set(letter, 0);
+  }
+
+  // Pattern 2: code-like tokens. Matches A1, A01, A-03, AA12, etc.
+  // Anchored by a word boundary + 1-3 letters + optional separator +
+  // 1-3 digits. Ignores obvious non-codes (years like "2026", letter-
+  // only sequences).
+  const codeRx = /\b([A-Z]{1,3})[-\s]?(\d{1,3})\b/g;
+  while ((m = codeRx.exec(text)) !== null) {
+    const letter = m[1]!.toUpperCase();
+    const bay = Number(m[2]);
+    // Skip obvious false positives — 4+ digit numbers ruled out by
+    // the regex, but also skip if bay > 500 (unlikely to be a bay).
+    if (!Number.isFinite(bay) || bay < 1 || bay > 500) continue;
+    // Skip letters that look like units/qualifiers — FT, M, KG, etc.
+    if (["FT", "IN", "CM", "MM", "KG", "LB", "M"].includes(letter)) continue;
+    const prev = aisleMaxBay.get(letter) ?? 0;
+    if (bay > prev) aisleMaxBay.set(letter, bay);
+  }
+
+  return Array.from(aisleMaxBay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([letter, max]) => ({
+      letter,
+      bayCount: max > 0 ? max : undefined,
+    }));
 }
 
 /** A, B, C, ..., Z, AA, AB, ... for >26 aisles. */
@@ -227,6 +276,112 @@ export const locationRouter = router({
         inserted += result.length;
       }
       return { inserted, requested: rows.length };
+    }),
+
+  /**
+   * Detect aisle configuration from an uploaded floor-map PDF via
+   * Firecrawl's document parser. Generates a short-lived signed URL
+   * to the PDF (so Firecrawl's backend can fetch it without our
+   * Clerk auth), sends it through /v1/scrape with the `pdf` parser,
+   * and groups the extracted text to find aisle letters + likely
+   * bay counts.
+   *
+   * Floor plans vary widely and text OCR of geometric diagrams is
+   * best-effort, so this returns a list of {letter, bayCount}
+   * suggestions the user confirms/edits in the layout UI rather
+   * than creating anything directly.
+   */
+  detectAislesFromMap: managerProcedure
+    .input(
+      z.object({
+        warehouseId: z.string().uuid(),
+        publicBaseUrl: z.string().url(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const apiKey = process.env.FIRECRAWL_API_KEY;
+      if (!apiKey) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "FIRECRAWL_API_KEY not set on the server.",
+        });
+      }
+      const signingKey = process.env.CLERK_SECRET_KEY;
+      if (!signingKey) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Server signing key not configured.",
+        });
+      }
+
+      // Require an uploaded PDF so we have something for Firecrawl
+      // to fetch. External URLs (pasted by the user) already work —
+      // we pass them straight through below.
+      const [wh] = await ctx.db
+        .select({
+          mapPdfUrl: schema.warehouses.mapPdfUrl,
+        })
+        .from(schema.warehouses)
+        .where(
+          and(
+            eq(schema.warehouses.id, input.warehouseId),
+            eq(schema.warehouses.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!wh?.mapPdfUrl) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No map PDF attached to this warehouse.",
+        });
+      }
+
+      // Build the URL we'll hand to Firecrawl. For user-pasted
+      // external URLs we use them directly. For our own uploaded
+      // files (served from /api/warehouses/.../map) we generate a
+      // 10-minute HMAC-signed URL that bypasses Clerk auth.
+      let targetUrl: string;
+      if (wh.mapPdfUrl.startsWith("/api/")) {
+        const exp = Date.now() + 10 * 60 * 1000;
+        const sig = createHmac("sha256", signingKey)
+          .update(`${input.warehouseId}.${exp}`)
+          .digest("hex");
+        const base = input.publicBaseUrl.replace(/\/$/, "");
+        targetUrl = `${base}/api/warehouses/${input.warehouseId}/map-signed?exp=${exp}&sig=${sig}`;
+      } else {
+        targetUrl = wh.mapPdfUrl;
+      }
+
+      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: targetUrl,
+          formats: ["markdown"],
+          parsers: ["pdf"],
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: `Firecrawl returned ${res.status}: ${body.slice(0, 500)}`,
+        });
+      }
+      const payload = (await res.json()) as {
+        data?: { markdown?: string; content?: string };
+      };
+      const text =
+        payload.data?.markdown ?? payload.data?.content ?? "";
+      const aisles = parseAislesFromText(text);
+      return {
+        rawTextLength: text.length,
+        aisles,
+      };
     }),
 
   /**

@@ -36,6 +36,7 @@ export default function WarehouseDetailPage({
   const bulkLayout = trpc.location.bulkGenerateWithLayout.useMutation({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
+  const detect = trpc.location.detectAislesFromMap.useMutation();
   const setMap = trpc.warehouse.setMapPdfUrl.useMutation({
     onSuccess: () => utils.warehouse.byId.invalidate({ id }),
   });
@@ -224,6 +225,42 @@ export default function WarehouseDetailPage({
       updateAisle(activeCapture.idx, { endX: x, endY: y });
       setActiveCapture(null);
       return;
+    }
+  }
+
+  async function handleDetect() {
+    const result = await detect.mutateAsync({
+      warehouseId: id,
+      publicBaseUrl: window.location.origin,
+    });
+    // Merge detected aisles into existing drafts. If we already have
+    // an aisle draft with the same letter, update its bayCount; else
+    // append a new row. Endpoints stay unset so the user still pins.
+    if (result.aisles.length > 0) {
+      setAisles((prev) => {
+        const byLetter = new Map(prev.map((a) => [a.letter.toUpperCase(), a]));
+        for (const d of result.aisles) {
+          const existing = byLetter.get(d.letter);
+          if (existing) {
+            if (d.bayCount) existing.bayCount = d.bayCount;
+          } else {
+            byLetter.set(d.letter, {
+              letter: d.letter,
+              bayCount: d.bayCount ?? 20,
+              levelsPerBay: prev[0]?.levelsPerBay ?? 4,
+              positionsPerLevel: prev[0]?.positionsPerLevel ?? 2,
+              startX: null,
+              startY: null,
+              endX: null,
+              endY: null,
+              reverseBayNumbers: false,
+            });
+          }
+        }
+        return Array.from(byLetter.values()).sort((a, b) =>
+          a.letter.localeCompare(b.letter),
+        );
+      });
     }
   }
 
@@ -707,7 +744,7 @@ export default function WarehouseDetailPage({
                   </div>
                 );
               })}
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <Btn
                   t={t}
                   type="button"
@@ -718,6 +755,19 @@ export default function WarehouseDetailPage({
                 >
                   Add aisle
                 </Btn>
+                {warehouse.data?.mapPdfUrl && (
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    icon={Ic.Spark}
+                    disabled={detect.isPending}
+                    onClick={handleDetect}
+                  >
+                    {detect.isPending ? "Detecting…" : "Detect from PDF"}
+                  </Btn>
+                )}
                 <Btn
                   t={t}
                   type="button"
@@ -736,7 +786,31 @@ export default function WarehouseDetailPage({
                     Created {bulkLayout.data.inserted}/{bulkLayout.data.requested} new.
                   </span>
                 )}
+                {detect.data && detect.data.aisles.length === 0 && (
+                  <span style={{ fontSize: 12, color: t.muted }}>
+                    Firecrawl parsed the PDF but didn&apos;t find aisle labels.
+                    Add them manually.
+                  </span>
+                )}
+                {detect.data && detect.data.aisles.length > 0 && (
+                  <span style={{ fontSize: 12, color: t.muted }}>
+                    Detected {detect.data.aisles.length} aisle(s) — review + pin start/end for each.
+                  </span>
+                )}
               </div>
+              {detect.error && (
+                <div
+                  style={{
+                    background: t.coralSoft,
+                    color: t.coral,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                >
+                  {detect.error.message}
+                </div>
+              )}
               {bulkLayout.error && (
                 <div
                   style={{
