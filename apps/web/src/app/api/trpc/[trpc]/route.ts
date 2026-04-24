@@ -3,9 +3,11 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { appRouter, createTRPCContext, ensureProvisioned } from "@wms/api";
 import { db, schema } from "@wms/db";
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
 const handler = async (req: Request) => {
   const { userId, orgId, orgRole } = await auth();
+  const traceId = randomUUID();
 
   let effectiveRole: "admin" | "manager" | "operator" | null = mapRole(orgRole ?? null);
 
@@ -52,8 +54,15 @@ const handler = async (req: Request) => {
           .limit(1);
         if (membership) effectiveRole = membership.role;
       }
-    } catch {
-      // Non-fatal — the procedure will throw FORBIDDEN if provisioning didn't happen.
+    } catch (error) {
+      // Non-fatal — the procedure will throw FORBIDDEN if provisioning didn't
+      // happen. Log for observability so drift can be diagnosed in production.
+      console.warn("[trpc] identity provisioning failed", {
+        traceId,
+        userId,
+        orgId,
+        error: error instanceof Error ? error.message : "unknown",
+      });
     }
   }
 
@@ -67,6 +76,7 @@ const handler = async (req: Request) => {
         userId: userId ?? null,
         orgId: orgId ?? null,
         role: effectiveRole,
+        traceId,
       }),
   });
 };
