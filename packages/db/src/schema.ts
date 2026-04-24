@@ -119,6 +119,9 @@ export const warehouses = pgTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     timezone: text("timezone").notNull().default("UTC"),
+    // URL to a PDF map of the warehouse floor. Phase 2 renders it in a
+    // viewer so operators can click a location to assign it to a spot.
+    mapPdfUrl: text("map_pdf_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -152,6 +155,17 @@ export const locations = pgTable(
     maxWeightKg: numeric("max_weight_kg", { precision: 10, scale: 2 }),
     // velocity class for ABC putaway (A = fast)
     velocityClass: text("velocity_class"),
+    // Rack coordinates. All nullable because docks / staging / floor
+    // locations don't have them. Code is generated as
+    // `${aisle}-${NN bay}-${level}-${NN position}`.
+    aisle: text("aisle"),
+    bay: integer("bay"),
+    level: integer("level"),
+    position: integer("position"),
+    // Pixel coordinates on the warehouse map PDF (phase 2). Nullable
+    // until the operator clicks to place the marker.
+    mapX: numeric("map_x", { precision: 10, scale: 3 }),
+    mapY: numeric("map_y", { precision: 10, scale: 3 }),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

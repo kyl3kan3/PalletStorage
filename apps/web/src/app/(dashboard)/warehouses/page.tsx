@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, SquircleIcon, TextField } from "~/components/kit";
@@ -85,18 +86,25 @@ export default function WarehousesPage() {
           </Card>
         )}
         {list.data?.map((w) => (
-          <Card t={t} key={w.id} padding={18}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <SquircleIcon t={t} icon={Ic.Warehouse} tint="primary" size={44} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: FONTS.mono, fontSize: 13, color: t.muted }}>
-                  {w.code}
+          <Link
+            key={w.id}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            href={`/warehouses/${w.id}` as any}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <Card t={t} padding={18}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <SquircleIcon t={t} icon={Ic.Warehouse} tint="primary" size={44} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: FONTS.mono, fontSize: 13, color: t.muted }}>
+                    {w.code}
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: t.ink }}>{w.name}</div>
+                  <div style={{ fontSize: 12, color: t.muted, marginTop: 2 }}>{w.timezone}</div>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: t.ink }}>{w.name}</div>
-                <div style={{ fontSize: 12, color: t.muted, marginTop: 2 }}>{w.timezone}</div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </Link>
         ))}
       </div>
     </div>

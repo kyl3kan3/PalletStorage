@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { schema } from "@wms/db";
-import { router, tenantProcedure } from "../trpc";
+import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 
 export const warehouseRouter = router({
@@ -30,4 +30,18 @@ export const warehouseRouter = router({
       .limit(1);
     return row ?? null;
   }),
+
+  /** Save / clear the URL of a PDF floor map for the warehouse. */
+  setMapPdfUrl: managerProcedure
+    .input(z.object({ id: z.string().uuid(), url: z.string().url().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      await ctx.db
+        .update(schema.warehouses)
+        .set({ mapPdfUrl: input.url })
+        .where(
+          and(eq(schema.warehouses.id, input.id), eq(schema.warehouses.organizationId, orgId)),
+        );
+      return { ok: true };
+    }),
 });

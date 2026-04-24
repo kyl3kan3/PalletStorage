@@ -397,3 +397,12 @@ ALTER TABLE "inbound_lines"
   ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
 ALTER TABLE "outbound_lines"
   ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
+
+-- 0011_location_rack_coords: rack coordinates + warehouse map URL.
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "aisle" text;
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "bay" integer;
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "level" integer;
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "position" integer;
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "map_x" numeric(10,3);
+ALTER TABLE "locations" ADD COLUMN IF NOT EXISTS "map_y" numeric(10,3);
+ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_url" text;
