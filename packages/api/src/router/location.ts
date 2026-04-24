@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { createHmac } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLocationCode } from "@wms/core";
@@ -279,49 +278,43 @@ export const locationRouter = router({
     }),
 
   /**
-   * Detect aisle configuration from an uploaded floor-map PDF via
-   * Firecrawl's document parser. Generates a short-lived signed URL
-   * to the PDF (so Firecrawl's backend can fetch it without our
-   * Clerk auth), sends it through /v1/scrape with the `pdf` parser,
-   * and groups the extracted text to find aisle letters + likely
-   * bay counts.
+   * Detect aisle configuration from an image of the warehouse floor
+   * plan via OpenAI Vision (gpt-4o). The client renders page 1 of
+   * the uploaded PDF to a canvas, grabs a base64 PNG, and sends it
+   * here. We forward the image to OpenAI with a structured-response
+   * prompt and parse the returned JSON.
    *
-   * Floor plans vary widely and text OCR of geometric diagrams is
-   * best-effort, so this returns a list of {letter, bayCount}
-   * suggestions the user confirms/edits in the layout UI rather
-   * than creating anything directly.
+   * Vision beats OCR for floor plans because plans are geometric
+   * drawings — the model actually looks at the shapes and reasons
+   * about aisle runs and bay counts rather than trying to extract
+   * text from a mostly blank page.
+   *
+   * Returns {letter, bayCount?} per aisle. Caller merges into the
+   * layout form so the user reviews before generating.
    */
   detectAislesFromMap: managerProcedure
     .input(
       z.object({
         warehouseId: z.string().uuid(),
-        publicBaseUrl: z.string().url(),
+        imageDataUrl: z
+          .string()
+          .regex(/^data:image\/(png|jpeg);base64,/, "Expected a PNG/JPEG data URL"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      const apiKey = process.env.FIRECRAWL_API_KEY;
+      const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "FIRECRAWL_API_KEY not set on the server.",
-        });
-      }
-      const signingKey = process.env.CLERK_SECRET_KEY;
-      if (!signingKey) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Server signing key not configured.",
+          message: "OPENAI_API_KEY not set on the server.",
         });
       }
 
-      // Require an uploaded PDF so we have something for Firecrawl
-      // to fetch. External URLs (pasted by the user) already work —
-      // we pass them straight through below.
+      // Make sure the warehouse belongs to the caller before we burn
+      // an API call on behalf of something they don't own.
       const [wh] = await ctx.db
-        .select({
-          mapPdfUrl: schema.warehouses.mapPdfUrl,
-        })
+        .select({ id: schema.warehouses.id })
         .from(schema.warehouses)
         .where(
           and(
@@ -330,60 +323,77 @@ export const locationRouter = router({
           ),
         )
         .limit(1);
-      if (!wh?.mapPdfUrl) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "No map PDF attached to this warehouse.",
-        });
+      if (!wh) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
       }
 
-      // Build the URL we'll hand to Firecrawl. For user-pasted
-      // external URLs we use them directly. For our own uploaded
-      // files (served from /api/warehouses/.../map) we generate a
-      // 10-minute HMAC-signed URL that bypasses Clerk auth.
-      let targetUrl: string;
-      if (wh.mapPdfUrl.startsWith("/api/")) {
-        const exp = Date.now() + 10 * 60 * 1000;
-        const sig = createHmac("sha256", signingKey)
-          .update(`${input.warehouseId}.${exp}`)
-          .digest("hex");
-        const base = input.publicBaseUrl.replace(/\/$/, "");
-        targetUrl = `${base}/api/warehouses/${input.warehouseId}/map-signed?exp=${exp}&sig=${sig}`;
-      } else {
-        targetUrl = wh.mapPdfUrl;
-      }
+      const prompt = [
+        "You are analyzing a warehouse floor plan.",
+        "Identify every rack aisle (a long run of pallet racking, usually labeled A, B, C, …).",
+        "For each aisle, estimate how many bays it has (a bay is one column of racking between uprights, usually 3-10 ft wide).",
+        "Ignore docks, office areas, and non-rack storage.",
+        'Return ONLY minified JSON in the shape {"aisles":[{"letter":"A","bayCount":20},{"letter":"B","bayCount":18}]}.',
+        "If you can't count bays confidently, omit the bayCount field for that aisle.",
+        "No prose, no markdown, no code fences — just the JSON.",
+      ].join(" ");
 
-      // Firecrawl v2: no `parsers` option — the API sniffs the
-      // Content-Type and parses PDFs automatically when the URL
-      // resolves to one. Just request markdown and trust the pipeline.
-      const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          url: targetUrl,
-          formats: ["markdown"],
+          model: "gpt-4o",
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                {
+                  type: "image_url",
+                  image_url: { url: input.imageDataUrl, detail: "high" },
+                },
+              ],
+            },
+          ],
+          max_tokens: 800,
+          temperature: 0,
         }),
       });
       if (!res.ok) {
         const body = await res.text();
         throw new TRPCError({
           code: "BAD_GATEWAY",
-          message: `Firecrawl returned ${res.status}: ${body.slice(0, 500)}`,
+          message: `OpenAI returned ${res.status}: ${body.slice(0, 500)}`,
         });
       }
       const payload = (await res.json()) as {
-        data?: { markdown?: string; content?: string };
+        choices?: Array<{ message?: { content?: string } }>;
       };
-      const text =
-        payload.data?.markdown ?? payload.data?.content ?? "";
-      const aisles = parseAislesFromText(text);
-      return {
-        rawTextLength: text.length,
-        aisles,
-      };
+      const content = payload.choices?.[0]?.message?.content ?? "";
+      let aisles: Array<{ letter: string; bayCount?: number }> = [];
+      try {
+        const parsed = JSON.parse(content) as {
+          aisles?: Array<{ letter?: unknown; bayCount?: unknown }>;
+        };
+        aisles = (parsed.aisles ?? [])
+          .map((a) => ({
+            letter:
+              typeof a.letter === "string" ? a.letter.toUpperCase().slice(0, 3) : "",
+            bayCount:
+              typeof a.bayCount === "number" && Number.isFinite(a.bayCount)
+                ? Math.max(1, Math.round(a.bayCount))
+                : undefined,
+          }))
+          .filter((a) => a.letter.length > 0);
+      } catch {
+        // If the model drifted and returned text despite response_format,
+        // fall back to the regex-based text parser.
+        aisles = parseAislesFromText(content);
+      }
+      return { aisles };
     }),
 
   /**

@@ -229,9 +229,30 @@ export default function WarehouseDetailPage({
   }
 
   async function handleDetect() {
+    if (!warehouse.data?.mapPdfUrl) return;
+    // Render page 1 of the PDF to a canvas so we can hand a PNG to
+    // OpenAI's vision API (floor plans are geometric, so vision
+    // beats text-OCR). pdfjs is already a dep from the map editor.
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+    const doc = await pdfjs.getDocument({ url: warehouse.data.mapPdfUrl }).promise;
+    const page = await doc.getPage(1);
+    // Cap the longest edge at 1600px — plenty of detail for vision
+    // while keeping the base64 payload well under the tRPC body limit.
+    const vp1 = page.getViewport({ scale: 1 });
+    const scale = Math.min(1600 / Math.max(vp1.width, vp1.height), 2);
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2D unavailable");
+    await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+    const imageDataUrl = canvas.toDataURL("image/png");
+
     const result = await detect.mutateAsync({
       warehouseId: id,
-      publicBaseUrl: window.location.origin,
+      imageDataUrl,
     });
     // Merge detected aisles into existing drafts. If we already have
     // an aisle draft with the same letter, update its bayCount; else
