@@ -15,6 +15,13 @@ export interface CreateContextOptions {
   role: "admin" | "manager" | "operator" | null;
   /** Request correlation id (propagated to logs). */
   traceId?: string;
+  /**
+   * Optional hook so mutations can push certain fields back to Clerk
+   * (e.g. keep the organization switcher label in sync when the user
+   * renames their org from /settings/company). Injected by the Next.js
+   * route handler which owns the Clerk SDK dependency.
+   */
+  updateClerkOrgName?: (clerkOrgId: string, name: string) => Promise<void>;
 }
 
 export async function createTRPCContext(opts: CreateContextOptions) {

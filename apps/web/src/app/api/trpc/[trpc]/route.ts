@@ -77,6 +77,10 @@ const handler = async (req: Request) => {
         orgId: orgId ?? null,
         role: effectiveRole,
         traceId,
+        updateClerkOrgName: async (clerkOrgId, name) => {
+          const client = await clerkClient();
+          await client.organizations.updateOrganization(clerkOrgId, { name });
+        },
       }),
   });
 };

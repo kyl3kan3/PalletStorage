@@ -80,6 +80,24 @@ export const organizationRouter = router({
         .update(schema.organizations)
         .set(patch)
         .where(eq(schema.organizations.id, orgId));
+
+      // Keep Clerk's org name in sync with ours so the OrganizationSwitcher
+      // in the shell updates without requiring a manual rename in Clerk.
+      if (
+        input.name !== undefined &&
+        input.name !== null &&
+        input.name !== "" &&
+        ctx.orgId &&
+        ctx.updateClerkOrgName
+      ) {
+        try {
+          await ctx.updateClerkOrgName(ctx.orgId, input.name);
+        } catch (e) {
+          // Don't fail the whole save if Clerk sync glitches — the DB
+          // write already landed. Logged for observability.
+          console.warn("[organization.updateProfile] Clerk sync failed", e);
+        }
+      }
       return { ok: true };
     }),
 
