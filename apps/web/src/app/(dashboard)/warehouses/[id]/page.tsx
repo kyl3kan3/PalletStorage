@@ -209,6 +209,40 @@ export default function WarehouseDetailPage({
   function removeAisle(idx: number) {
     setAisles((prev) => prev.filter((_, i) => i !== idx));
   }
+  function clearAislePins(idx: number) {
+    setAisles((prev) =>
+      prev.map((a, i) =>
+        i === idx
+          ? { ...a, startX: null, startY: null, endX: null, endY: null }
+          : a,
+      ),
+    );
+    // If this row was actively pinning, cancel that too.
+    if (
+      activeCapture?.kind === "aisle-start" ||
+      activeCapture?.kind === "aisle-end"
+    ) {
+      if (activeCapture.idx === idx) setActiveCapture(null);
+    }
+  }
+  function resetLayout() {
+    setAisles([
+      {
+        letter: "A",
+        bayCount: 20,
+        levelsPerBay: 4,
+        positionsPerLevel: 2,
+        startX: null,
+        startY: null,
+        endX: null,
+        endY: null,
+        reverseBayNumbers: false,
+      },
+    ]);
+    setActiveCapture(null);
+    detect.reset();
+    bulkLayout.reset();
+  }
 
   // Central click router — one handler for all map captures.
   function handleMapPlace(x: number, y: number) {
@@ -784,6 +818,32 @@ export default function WarehouseDetailPage({
                     >
                       ×
                     </button>
+                    {(startSet || endSet) && (
+                      <div
+                        style={{
+                          gridColumn: "1 / -1",
+                          display: "flex",
+                          justifyContent: "flex-end",
+                          marginTop: -4,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => clearAislePins(idx)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: t.muted,
+                            fontSize: 11,
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            padding: 0,
+                          }}
+                        >
+                          Clear pins for {a.letter}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -797,6 +857,23 @@ export default function WarehouseDetailPage({
                   onClick={addAisle}
                 >
                   Add aisle
+                </Btn>
+                <Btn
+                  t={t}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Reset the layout? This clears every aisle draft and any detection result — it does NOT delete locations that are already saved.",
+                      )
+                    ) {
+                      resetLayout();
+                    }
+                  }}
+                >
+                  Reset layout
                 </Btn>
                 {warehouse.data?.mapPdfUrl && (
                   <Btn
