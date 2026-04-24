@@ -6,8 +6,7 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { outboundStatusTone } from "~/lib/statusTone";
-import { friendlyOutboundStatus, nextOutboundStep } from "~/lib/friendly";
-import { NextStepCard } from "~/components/next-step-card";
+import { friendlyOutboundStatus } from "~/lib/friendly";
 import { useIsManager } from "~/lib/useRole";
 import { qtyUnitLabel } from "@wms/core";
 
@@ -88,92 +87,390 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
         }
       />
 
-      {/* Next step card — surfaces the single primary action for the
-          current status so a basic user doesn't have to scan a row of
-          five buttons. Secondary actions stay available below. */}
-      {order && !isTerminal && (() => {
-        const step = nextOutboundStep(status, allLinesPicked);
-        if (!step) return null;
-        return (
-          <div style={{ marginBottom: 16 }}>
-            <NextStepCard step={step}>
-              {status === "open" || status === "draft" ? (
-                <Btn
-                  t={t}
-                  variant="accent"
-                  size="md"
-                  icon={Ic.Spark}
-                  onClick={() => genPicks.mutate({ outboundOrderId: id })}
-                  disabled={genPicks.isPending}
-                >
-                  {genPicks.isPending ? "Generating…" : "Generate picks"}
-                </Btn>
-              ) : null}
-              {status === "picking" && allLinesPicked ? (
-                <Btn
-                  t={t}
-                  variant="accent"
-                  size="md"
-                  icon={Ic.Package}
-                  disabled={pack.isPending}
-                  onClick={() => pack.mutate({ id })}
-                >
-                  {pack.isPending ? "Marking packed…" : "Mark packed"}
-                </Btn>
-              ) : null}
-              {status === "picking" && !allLinesPicked ? (
-                <Btn
-                  t={t}
-                  variant="accent"
-                  size="md"
-                  icon={Ic.Arrow}
-                  onClick={() =>
-                    document
-                      .getElementById("picks-section")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                  }
-                >
-                  Complete picks
-                </Btn>
-              ) : null}
-              {status === "packed" ? (
-                <>
-                  <TextField
-                    t={t}
-                    placeholder="Carrier"
-                    value={carrier}
-                    onChange={(e) => setCarrier(e.target.value)}
-                    style={{ minWidth: 160 }}
-                  />
-                  <TextField
-                    t={t}
-                    placeholder="Tracking #"
-                    value={tracking}
-                    onChange={(e) => setTracking(e.target.value)}
-                    style={{ minWidth: 180 }}
-                  />
-                  <Btn
-                    t={t}
-                    variant="accent"
-                    size="md"
-                    icon={Ic.Truck}
-                    disabled={ship.isPending}
-                    onClick={() =>
-                      ship.mutate({
-                        id,
-                        carrier: carrier.trim() || undefined,
-                        trackingNumber: tracking.trim() || undefined,
-                      })
-                    }
-                  >
-                    {ship.isPending ? "Shipping…" : "Confirm ship"}
-                  </Btn>
-                </>
-              ) : null}
-            </NextStepCard>
+      {/* Workflow stepper — every action the order will pass through
+          is visible at once. Each row shows its status (done / current
+          / upcoming) and the button to advance from that step. Buttons
+          for steps that aren't yet reachable are disabled with a hint
+          rather than hidden, so users always see the full path. */}
+      {order && (
+        <Card t={t}>
+          <div
+            style={{
+              fontSize: 11,
+              color: t.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              fontWeight: 600,
+              marginBottom: 12,
+            }}
+          >
+            Order progress
           </div>
-        );
-      })()}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {(() => {
+              const generatedPicks = (picksQ.data?.length ?? 0) > 0;
+              const completedPicks = (picksQ.data ?? []).filter(
+                (p) => p.completedAt,
+              ).length;
+              const totalPicks = picksQ.data?.length ?? 0;
+              const steps: Array<{
+                n: number;
+                title: string;
+                sub: string;
+                state: "done" | "current" | "upcoming";
+                action: React.ReactNode;
+              }> = [
+                {
+                  n: 1,
+                  title: "Generate picks",
+                  sub: generatedPicks
+                    ? `${totalPicks} pick(s) created`
+                    : "Allocate pallets to this order",
+                  state:
+                    status === "draft" || status === "open"
+                      ? "current"
+                      : "done",
+                  action: (
+                    <Btn
+                      t={t}
+                      variant={
+                        status === "draft" || status === "open"
+                          ? "accent"
+                          : "secondary"
+                      }
+                      size="sm"
+                      icon={Ic.Spark}
+                      disabled={
+                        genPicks.isPending ||
+                        !(status === "draft" || status === "open") ||
+                        lines.length === 0
+                      }
+                      onClick={() =>
+                        genPicks.mutate({ outboundOrderId: id })
+                      }
+                    >
+                      {genPicks.isPending ? "Generating…" : "Generate"}
+                    </Btn>
+                  ),
+                },
+                {
+                  n: 2,
+                  title: "Complete picks",
+                  sub: generatedPicks
+                    ? `${completedPicks}/${totalPicks} done`
+                    : "After picks are generated",
+                  state:
+                    status === "picking" && !allLinesPicked
+                      ? "current"
+                      : status === "picking" && allLinesPicked
+                        ? "done"
+                        : completedPicks >= totalPicks && totalPicks > 0
+                          ? "done"
+                          : status === "draft" || status === "open"
+                            ? "upcoming"
+                            : "done",
+                  action: (
+                    <Btn
+                      t={t}
+                      variant={
+                        status === "picking" && !allLinesPicked
+                          ? "accent"
+                          : "secondary"
+                      }
+                      size="sm"
+                      icon={Ic.Arrow}
+                      disabled={!generatedPicks}
+                      onClick={() =>
+                        document
+                          .getElementById("picks-section")
+                          ?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          })
+                      }
+                    >
+                      View picks
+                    </Btn>
+                  ),
+                },
+                {
+                  n: 3,
+                  title: "Mark packed",
+                  sub:
+                    status === "packed" || status === "shipped"
+                      ? "Packed"
+                      : "When staging is ready for carrier",
+                  state:
+                    status === "packed" || status === "shipped"
+                      ? "done"
+                      : status === "picking" && allLinesPicked
+                        ? "current"
+                        : "upcoming",
+                  action: (
+                    <Btn
+                      t={t}
+                      variant={
+                        status === "picking" && allLinesPicked
+                          ? "accent"
+                          : "secondary"
+                      }
+                      size="sm"
+                      icon={Ic.Package}
+                      disabled={
+                        pack.isPending ||
+                        !(status === "picking" && allLinesPicked)
+                      }
+                      onClick={() => pack.mutate({ id })}
+                    >
+                      {pack.isPending ? "Packing…" : "Mark packed"}
+                    </Btn>
+                  ),
+                },
+                {
+                  n: 4,
+                  title: "Ship",
+                  sub:
+                    status === "shipped"
+                      ? "Shipped"
+                      : "Enter carrier + tracking; BOL generated automatically",
+                  state:
+                    status === "shipped"
+                      ? "done"
+                      : status === "packed"
+                        ? "current"
+                        : "upcoming",
+                  action:
+                    status === "packed" ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <TextField
+                          t={t}
+                          placeholder="Carrier"
+                          value={carrier}
+                          onChange={(e) => setCarrier(e.target.value)}
+                          style={{ width: 110, fontSize: 12.5 }}
+                        />
+                        <TextField
+                          t={t}
+                          placeholder="Tracking #"
+                          value={tracking}
+                          onChange={(e) => setTracking(e.target.value)}
+                          style={{ width: 130, fontSize: 12.5 }}
+                        />
+                        <Btn
+                          t={t}
+                          variant="accent"
+                          size="sm"
+                          icon={Ic.Truck}
+                          disabled={ship.isPending}
+                          onClick={() =>
+                            ship.mutate({
+                              id,
+                              carrier: carrier.trim() || undefined,
+                              trackingNumber: tracking.trim() || undefined,
+                            })
+                          }
+                        >
+                          {ship.isPending ? "Shipping…" : "Confirm"}
+                        </Btn>
+                      </div>
+                    ) : (
+                      <Btn
+                        t={t}
+                        variant="secondary"
+                        size="sm"
+                        icon={Ic.Truck}
+                        disabled
+                      >
+                        Ship
+                      </Btn>
+                    ),
+                },
+                {
+                  n: 5,
+                  title: "Close & invoice",
+                  sub: qbStatus.data?.connected
+                    ? "Export invoice to QuickBooks"
+                    : "QuickBooks not connected — settings → integrations",
+                  state: status === "shipped" ? "current" : "upcoming",
+                  action: (
+                    <Btn
+                      t={t}
+                      variant={status === "shipped" ? "accent" : "secondary"}
+                      size="sm"
+                      icon={Ic.Dollar}
+                      disabled={
+                        !qbStatus.data?.connected ||
+                        exportOutbound.isPending ||
+                        status !== "shipped"
+                      }
+                      onClick={() =>
+                        exportOutbound.mutate({ outboundOrderId: id })
+                      }
+                    >
+                      {exportOutbound.isPending
+                        ? "Exporting…"
+                        : "Export to QB"}
+                    </Btn>
+                  ),
+                },
+              ];
+              return steps.map((s) => {
+                const badgeBg =
+                  s.state === "done"
+                    ? t.mint
+                    : s.state === "current"
+                      ? t.primary
+                      : t.surfaceAlt;
+                const badgeFg =
+                  s.state === "current"
+                    ? t.primaryText
+                    : s.state === "done"
+                      ? t.ink
+                      : t.muted;
+                return (
+                  <div
+                    key={s.n}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "28px 1fr auto",
+                      gap: 12,
+                      alignItems: "center",
+                      padding: "10px 12px",
+                      background:
+                        s.state === "current" ? t.primarySoft : "transparent",
+                      borderRadius: 10,
+                      border:
+                        s.state === "current"
+                          ? `1.5px solid ${t.primary}`
+                          : `1.5px dashed ${t.border}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 999,
+                        background: badgeBg,
+                        color: badgeFg,
+                        fontFamily: FONTS.mono,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        display: "grid",
+                        placeItems: "center",
+                      }}
+                    >
+                      {s.state === "done" ? "✓" : s.n}
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: s.state === "upcoming" ? t.muted : t.ink,
+                        }}
+                      >
+                        {s.title}
+                      </div>
+                      <div style={{ fontSize: 12, color: t.muted }}>{s.sub}</div>
+                    </div>
+                    <div>{s.action}</div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+
+          {genPicks.error && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {genPicks.error.message}
+            </div>
+          )}
+          {ship.error && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {ship.error.message}
+            </div>
+          )}
+          {pack.error && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {pack.error.message}
+            </div>
+          )}
+          {exportOutbound.error && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {exportOutbound.error.message}
+            </div>
+          )}
+          {exportOutbound.data && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.primarySoft,
+                color: t.ink,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              Exported as Invoice {exportOutbound.data.qboId}
+            </div>
+          )}
+        </Card>
+      )}
+      {isTerminal && order && (
+        <Card t={t} tint={status === "shipped" ? "mint" : "coral"}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: t.ink }}>
+            Order is {status}.{" "}
+            {status === "shipped"
+              ? "Download the BOL below or export the invoice to QuickBooks."
+              : order.cancelReason
+                ? `Reason: ${order.cancelReason}`
+                : "No further actions."}
+          </div>
+        </Card>
+      )}
 
       <Card t={t} padding={0}>
         <div
@@ -424,17 +721,6 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
           </Tag>
         </div>
       )}
-      {ship.error && (
-        <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
-          {ship.error.message}
-        </div>
-      )}
-      {pack.error && (
-        <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
-          {pack.error.message}
-        </div>
-      )}
-
       {canCancel && (
         <div style={{ marginTop: 16 }}>
           <Card t={t}>
@@ -539,27 +825,6 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
         </div>
       )}
 
-      <div style={{ marginTop: 16 }}>
-        <Card t={t}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <Btn
-              t={t}
-              variant="secondary"
-              size="md"
-              icon={Ic.Download}
-              disabled={!qbStatus.data?.connected || exportOutbound.isPending || status !== "shipped"}
-              onClick={() => exportOutbound.mutate({ outboundOrderId: id })}
-            >
-              {exportOutbound.isPending ? "Exporting…" : "Export to QuickBooks"}
-            </Btn>
-            {exportOutbound.data && (
-              <Tag t={t} tone="mint">
-                Exported as Invoice {exportOutbound.data.qboId}
-              </Tag>
-            )}
-          </div>
-        </Card>
-      </div>
     </div>
   );
 }
