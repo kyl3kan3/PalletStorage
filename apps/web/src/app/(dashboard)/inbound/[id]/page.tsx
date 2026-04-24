@@ -356,7 +356,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                     </Tag>
                   ) : v < 0 ? (
                     <Tag t={t} tone="coral">
-                      short {v}
+                      short {Math.abs(v)}
                     </Tag>
                   ) : (
                     <Tag t={t} tone="sky">
@@ -584,7 +584,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         <Card t={t}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <a
-              href={`/api/inbound-orders/${id}/receipt.pdf`}
+              href={`/api/inbound-orders/${id}/receipt`}
               target="_blank"
               rel="noreferrer"
               style={{ textDecoration: "none" }}
@@ -594,7 +594,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               </Btn>
             </a>
             <a
-              href={`/api/inbound-orders/${id}/report.pdf`}
+              href={`/api/inbound-orders/${id}/report`}
               target="_blank"
               rel="noreferrer"
               style={{ textDecoration: "none" }}

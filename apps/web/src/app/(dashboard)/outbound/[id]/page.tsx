@@ -308,7 +308,7 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   {s.shippedAt.toLocaleDateString()}
                 </span>
                 <a
-                  href={`/api/shipments/${s.id}/bol.pdf`}
+                  href={`/api/shipments/${s.id}/bol`}
                   target="_blank"
                   rel="noreferrer"
                   style={{ color: t.primaryDeep, fontWeight: 600, textDecoration: "none" }}
