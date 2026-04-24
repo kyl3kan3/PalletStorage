@@ -297,10 +297,91 @@ export default function WarehouseDetailPage({
     // anti-aliased edges, and vision accepts both.
     const imageDataUrl = canvas.toDataURL("image/jpeg", 0.9);
 
+    // Extract vector geometry from the PDF so we can hand the model
+    // hard facts (exact rectangles + lines) alongside the rendered
+    // image. CAD/design exports almost always contain real shapes,
+    // not just pixels, and feeding them in keeps vision honest about
+    // where things actually are. Coords are normalized 0-1 against
+    // the page bounding box.
+    const opList = await page.getOperatorList();
+    // pdfjs OPS constants we care about — pdfjs.OPS is an enum
+    // import; pull the few we need.
+    const OPS = (pdfjs as unknown as { OPS: Record<string, number> }).OPS;
+    const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    const pageW = vp1.width;
+    const pageH = vp1.height;
+    // Track current path so we can detect rectangles drawn as 4 lines.
+    let currentPath: Array<[number, number]> = [];
+    for (let i = 0; i < opList.fnArray.length; i++) {
+      const fn = opList.fnArray[i];
+      const args = opList.argsArray[i] as number[];
+      const a0 = args?.[0];
+      const a1 = args?.[1];
+      const a2 = args?.[2];
+      const a3 = args?.[3];
+      if (fn === OPS.rectangle) {
+        if (
+          typeof a0 === "number" &&
+          typeof a1 === "number" &&
+          typeof a2 === "number" &&
+          typeof a3 === "number" &&
+          Math.abs(a2) > 0 &&
+          Math.abs(a3) > 0
+        ) {
+          rects.push({
+            x: a0 / pageW,
+            y: 1 - (a1 + a3) / pageH, // PDF Y is bottom-up; flip to top-down
+            w: Math.abs(a2) / pageW,
+            h: Math.abs(a3) / pageH,
+          });
+        }
+      } else if (fn === OPS.moveTo) {
+        if (typeof a0 === "number" && typeof a1 === "number") {
+          currentPath = [[a0, a1]];
+        }
+      } else if (fn === OPS.lineTo) {
+        if (
+          currentPath.length > 0 &&
+          typeof a0 === "number" &&
+          typeof a1 === "number"
+        ) {
+          const last = currentPath[currentPath.length - 1]!;
+          const px = last[0];
+          const py = last[1];
+          const dx = a0 - px;
+          const dy = a1 - py;
+          const len = Math.hypot(dx, dy);
+          if (len / Math.max(pageW, pageH) > 0.05) {
+            lines.push({
+              x1: px / pageW,
+              y1: 1 - py / pageH,
+              x2: a0 / pageW,
+              y2: 1 - a1 / pageH,
+            });
+          }
+          currentPath.push([a0, a1]);
+        }
+      }
+    }
+
+    // Filter rects to "interesting" ones — strip the page-spanning
+    // border (probably the building outline) and tiny noise. Cap the
+    // count we send so the prompt doesn't balloon.
+    const interestingRects = rects
+      .filter((r) => r.w > 0.005 && r.h > 0.005)
+      .filter((r) => !(r.w > 0.95 && r.h > 0.95))
+      .slice(0, 400);
+    const interestingLines = lines.slice(0, 200);
+
     const result = await detect.mutateAsync({
       warehouseId: id,
       imageDataUrl,
       userHint: detectHint.trim() || undefined,
+      vectorHints: {
+        rects: interestingRects,
+        lines: interestingLines,
+      },
     });
     // Merge detected aisles into existing drafts. If an aisle with
     // the same letter is already in the list we update its bayCount

@@ -299,13 +299,35 @@ export const locationRouter = router({
         imageDataUrl: z
           .string()
           .regex(/^data:image\/(png|jpeg);base64,/, "Expected a PNG/JPEG data URL"),
-        /** Free-text hint describing how racking is drawn in this
-         * specific PDF. Example: "Aisles are the long horizontal
-         * rectangles labeled A-F. Bays are the small vertical lines
-         * inside each rectangle." Drastically improves accuracy
-         * because rack drawings vary widely between architectural
-         * conventions. */
         userHint: z.string().trim().max(1000).optional(),
+        /** Vector geometry extracted from the PDF on the client side
+         * via pdfjs. Coordinates are normalized 0-1 with origin at
+         * top-left of the page. Stripped to "interesting" shapes
+         * before transmission so the prompt stays compact. */
+        vectorHints: z
+          .object({
+            rects: z
+              .array(
+                z.object({
+                  x: z.number(),
+                  y: z.number(),
+                  w: z.number(),
+                  h: z.number(),
+                }),
+              )
+              .max(500),
+            lines: z
+              .array(
+                z.object({
+                  x1: z.number(),
+                  y1: z.number(),
+                  x2: z.number(),
+                  y2: z.number(),
+                }),
+              )
+              .max(300),
+          })
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -334,24 +356,44 @@ export const locationRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
       }
 
+      // Format the vector hints compactly for the prompt. Round
+      // coords to 3 decimals so a few hundred shapes don't bloat
+      // the message.
+      const fmt = (n: number) => Math.round(n * 1000) / 1000;
+      const vectorBlock = input.vectorHints
+        ? [
+            "GEOMETRY EXTRACTED DIRECTLY FROM THE PDF (use these as ground truth — these are the EXACT shapes the drawing contains, not your guess from the image):",
+            `${input.vectorHints.rects.length} rectangles (x, y, w, h, all 0-1 fractions of page):`,
+            input.vectorHints.rects
+              .map((r) => `(${fmt(r.x)},${fmt(r.y)},${fmt(r.w)},${fmt(r.h)})`)
+              .join(" "),
+            `${input.vectorHints.lines.length} long lines (x1,y1,x2,y2):`,
+            input.vectorHints.lines
+              .map((l) => `(${fmt(l.x1)},${fmt(l.y1)},${fmt(l.x2)},${fmt(l.y2)})`)
+              .join(" "),
+            "Long-thin rectangles (one dimension >> the other) and pairs of long parallel lines are likely rack runs. Use the IMAGE to read aisle labels and identify which shapes are racking vs walls vs doors. Use these COORDS for your start/end output — don't make up positions.",
+          ].join("\n")
+        : "";
+
       const prompt = [
-        "You are analyzing a warehouse floor plan image.",
+        "You are analyzing a warehouse floor plan.",
         input.userHint
-          ? `The person who uploaded this drawing told you: """${input.userHint.replace(/"/g, "'")}""". Use this as your primary guide — they know how their drawing was made.`
+          ? `The person who uploaded this drawing told you: """${input.userHint.replace(/"/g, "'")}""". Use this as your primary guide.`
           : "",
-        "Floor plans vary widely. Racking can show as: parallel double-lines, thick filled rectangles, hatched rectangles, narrow rectangles with vertical tick marks for bays, or even just labeled regions. Look at this specific image carefully — don't assume any single convention.",
+        vectorBlock,
         "Identify every rack aisle (a continuous run of pallet racking).",
         "STRICT RULES:",
-        "1. If after careful inspection you genuinely don't see any rack runs, return {\"aisles\":[],\"notes\":\"<what you DID see in detail — describe shapes, labels, lines, regions>\"} so the user can give you better hints next time.",
-        "2. If you see candidates but you're unsure they're racking, INCLUDE them anyway and explain in notes — better to surface a guess the user can dismiss than to bail.",
-        "3. For each aisle return: letter, bayCount (estimated divisions along the run), startX/Y (center of first bay, 0-1 of image), endX/Y (center of last bay, 0-1 of image).",
-        "4. Coord system: (0,0)=top-left, (1,1)=bottom-right.",
-        "5. In `notes`, describe what you saw in 1-3 sentences — what the racking looks like in this specific drawing, where labels appear, what's NOT racking, anything ambiguous. This is your back-channel to the user.",
+        "1. Use the GEOMETRY block above as ground truth for shape and position — your start/end coords MUST correspond to actual rectangles or lines in that list. Do NOT distribute aisles 'evenly' if the geometry shows them clustered, and do NOT invent rectangles that aren't in the list.",
+        "2. The image is for reading labels and disambiguating which shapes are racking vs walls/doors/text — not for guessing geometry.",
+        "3. If you genuinely can't tell which shapes are racks, return {\"aisles\":[],\"notes\":\"<describe the geometry you saw>\"}.",
+        "4. For each aisle return: letter, bayCount (estimated divisions along the run, e.g. via tick marks inside the rectangle or sub-rectangles), startX/Y (center of first bay), endX/Y (center of last bay).",
+        "5. Coord system: (0,0)=top-left, (1,1)=bottom-right.",
+        "6. In `notes`, name the specific rectangles you picked (by their coords) and why — that lets the user verify you read the actual drawing.",
         'Return minified JSON: {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}],"notes":"..."}.',
         "No prose, no markdown, no code fences — just the JSON.",
       ]
         .filter(Boolean)
-        .join(" ");
+        .join("\n");
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
