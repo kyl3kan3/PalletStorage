@@ -507,4 +507,75 @@ export const locationRouter = router({
         );
       return { ok: true };
     }),
+
+  /**
+   * Wipe mapX/mapY from every rack location in a warehouse.
+   * Used by the "Reset layout" button to clear bad auto-placements
+   * from a previous generation pass without deleting the locations
+   * (they keep their codes; you just have to re-pin).
+   */
+  clearAllMapPins: managerProcedure
+    .input(z.object({ warehouseId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const result = await ctx.db
+        .update(schema.locations)
+        .set({ mapX: null, mapY: null })
+        .where(
+          and(
+            eq(schema.locations.warehouseId, input.warehouseId),
+            eq(schema.locations.organizationId, orgId),
+          ),
+        )
+        .returning({ id: schema.locations.id });
+      return { cleared: result.length };
+    }),
+
+  /**
+   * Delete every rack location in a warehouse. Nuclear option —
+   * useful when an auto-generated layout was so wrong that the
+   * codes themselves are useless (wrong aisle letters, wrong bay
+   * counts) and the user wants a clean slate. Pallets currently
+   * stored at one of these locations would orphan, so we refuse
+   * if any pallet has a current_location_id pointing into the set.
+   */
+  deleteAllRacks: managerProcedure
+    .input(z.object({ warehouseId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      // Bail if any pallet is currently sitting at one of these locations.
+      const inUse = await ctx.db
+        .select({ id: schema.pallets.id })
+        .from(schema.pallets)
+        .innerJoin(
+          schema.locations,
+          eq(schema.locations.id, schema.pallets.currentLocationId),
+        )
+        .where(
+          and(
+            eq(schema.locations.warehouseId, input.warehouseId),
+            eq(schema.locations.organizationId, orgId),
+            eq(schema.locations.type, "rack"),
+          ),
+        )
+        .limit(1);
+      if (inUse.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Can't delete: at least one pallet is stored at a rack in this warehouse. Move pallets first.",
+        });
+      }
+      const result = await ctx.db
+        .delete(schema.locations)
+        .where(
+          and(
+            eq(schema.locations.warehouseId, input.warehouseId),
+            eq(schema.locations.organizationId, orgId),
+            eq(schema.locations.type, "rack"),
+          ),
+        )
+        .returning({ id: schema.locations.id });
+      return { deleted: result.length };
+    }),
 });

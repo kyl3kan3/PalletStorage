@@ -37,6 +37,12 @@ export default function WarehouseDetailPage({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
   const detect = trpc.location.detectAislesFromMap.useMutation();
+  const clearAllPins = trpc.location.clearAllMapPins.useMutation({
+    onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
+  });
+  const deleteAllRacks = trpc.location.deleteAllRacks.useMutation({
+    onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
+  });
   const [detectHint, setDetectHint] = useState("");
   const setMap = trpc.warehouse.setMapPdfUrl.useMutation({
     onSuccess: () => utils.warehouse.byId.invalidate({ id }),
@@ -226,7 +232,7 @@ export default function WarehouseDetailPage({
       if (activeCapture.idx === idx) setActiveCapture(null);
     }
   }
-  function resetLayout() {
+  function resetLayoutDrafts() {
     setAisles([
       {
         letter: "A",
@@ -243,6 +249,32 @@ export default function WarehouseDetailPage({
     setActiveCapture(null);
     detect.reset();
     bulkLayout.reset();
+  }
+  /**
+   * Full reset: wipes the per-aisle drafts in the form AND clears
+   * mapX/mapY on every rack location in the DB. Locations themselves
+   * stay (their codes are still valid) — just unpinned. For a true
+   * "start over" use Delete all racks below.
+   */
+  async function resetEverything() {
+    if (
+      !confirm(
+        "Reset the layout AND clear every pin on the map? Locations themselves keep their codes, but their map positions are wiped. This won't delete saved data.",
+      )
+    )
+      return;
+    await clearAllPins.mutateAsync({ warehouseId: id });
+    resetLayoutDrafts();
+  }
+  async function nukeRacks() {
+    if (
+      !confirm(
+        "Delete EVERY rack location in this warehouse? This permanently removes the codes (A-01-1-01 etc). Inventory currently stored on a rack will block the delete.",
+      )
+    )
+      return;
+    await deleteAllRacks.mutateAsync({ warehouseId: id });
+    resetLayoutDrafts();
   }
 
   // Central click router — one handler for all map captures.
@@ -946,17 +978,21 @@ export default function WarehouseDetailPage({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        "Reset the layout? This clears every aisle draft and any detection result — it does NOT delete locations that are already saved.",
-                      )
-                    ) {
-                      resetLayout();
-                    }
-                  }}
+                  disabled={clearAllPins.isPending}
+                  onClick={resetEverything}
                 >
-                  Reset layout
+                  {clearAllPins.isPending ? "Resetting…" : "Reset layout"}
+                </Btn>
+                <Btn
+                  t={t}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={deleteAllRacks.isPending}
+                  onClick={nukeRacks}
+                  style={{ color: t.coral }}
+                >
+                  {deleteAllRacks.isPending ? "Deleting…" : "Delete all racks"}
                 </Btn>
                 {warehouse.data?.mapPdfUrl && (
                   <Btn
