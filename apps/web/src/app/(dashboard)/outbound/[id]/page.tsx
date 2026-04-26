@@ -125,16 +125,22 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   title: "Generate picks",
                   sub: generatedPicks
                     ? `${totalPicks} pick(s) created`
-                    : "Allocate pallets to this order",
+                    : status === "picking"
+                      ? "No picks were allocated last try — receive stock and retry"
+                      : "Allocate pallets to this order",
                   state:
-                    status === "draft" || status === "open"
+                    status === "draft" ||
+                    status === "open" ||
+                    (status === "picking" && !generatedPicks)
                       ? "current"
                       : "done",
                   action: (
                     <Btn
                       t={t}
                       variant={
-                        status === "draft" || status === "open"
+                        status === "draft" ||
+                        status === "open" ||
+                        (status === "picking" && !generatedPicks)
                           ? "accent"
                           : "secondary"
                       }
@@ -142,7 +148,11 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                       icon={Ic.Spark}
                       disabled={
                         genPicks.isPending ||
-                        !(status === "draft" || status === "open") ||
+                        !(
+                          status === "draft" ||
+                          status === "open" ||
+                          (status === "picking" && !generatedPicks)
+                        ) ||
                         lines.length === 0
                       }
                       onClick={() =>
@@ -714,11 +724,31 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
       {/* Confirmation toasts that used to live on the old action cards.
           Kept as inline notices because the buttons themselves now live
           in the Next-step card at the top. */}
-      {genPicks.data && (
+      {genPicks.data && genPicks.data.created > 0 && (
         <div style={{ marginTop: 12 }}>
           <Tag t={t} tone="mint">
             Created {genPicks.data.created} pick(s)
           </Tag>
+        </div>
+      )}
+      {genPicks.data && genPicks.data.created === 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            background: t.coralSoft,
+            color: t.coral,
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontSize: 13,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            No stock to allocate.
+          </div>
+          The allocator couldn&apos;t find any stored pallets matching the
+          products on this order. Receive an inbound order with the
+          right products first, then click Generate again — the order
+          stayed in its current status so you can retry.
         </div>
       )}
       {canCancel && (

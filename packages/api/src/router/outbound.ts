@@ -114,7 +114,30 @@ export const outboundRouter = router({
           )
           .limit(1);
         if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
-        if (order.status !== "open" && order.status !== "draft") {
+        // Allow re-running on a 'picking' order if it has zero picks
+        // — that means a previous attempt found no stock and the user
+        // has since received inventory (or fixed something else).
+        if (order.status === "picking") {
+          const [existing] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.picks)
+            .innerJoin(
+              schema.outboundLines,
+              eq(schema.outboundLines.id, schema.picks.outboundLineId),
+            )
+            .where(
+              and(
+                eq(schema.picks.organizationId, orgId),
+                eq(schema.outboundLines.outboundOrderId, input.outboundOrderId),
+              ),
+            );
+          if ((existing?.count ?? 0) > 0) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Order already has picks. Cancel them first if you want to regenerate.",
+            });
+          }
+        } else if (order.status !== "open" && order.status !== "draft") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
             message: `Cannot generate picks for order in status '${order.status}'`,
@@ -218,12 +241,28 @@ export const outboundRouter = router({
           );
         }
 
-        await tx
-          .update(schema.outboundOrders)
-          .set({ status: "picking" })
-          .where(eq(schema.outboundOrders.id, input.outboundOrderId));
+        // Only transition into 'picking' if we actually created at
+        // least one pick. Otherwise leave the order in its prior
+        // status so the user can retry once inventory arrives —
+        // moving status forward without picks would soft-lock them
+        // (no picks to complete -> no way to advance).
+        if (ordered.length > 0) {
+          await tx
+            .update(schema.outboundOrders)
+            .set({ status: "picking" })
+            .where(eq(schema.outboundOrders.id, input.outboundOrderId));
+        }
 
-        return { created: ordered.length };
+        // Diagnostic so the UI can explain a zero-create result.
+        const totalDemand = lines.reduce(
+          (n, l) => n + (l.qtyOrdered - l.qtyPicked),
+          0,
+        );
+        return {
+          created: ordered.length,
+          requested: lines.length,
+          unmetDemand: Math.max(0, totalDemand - ordered.length),
+        };
       });
     }),
 
