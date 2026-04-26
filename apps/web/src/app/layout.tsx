@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { Fraunces, Geist, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { TRPCProvider } from "./providers";
 import "./globals.css";
 
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <html lang="en" className={`${fraunces.variable} ${geist.variable} ${mono.variable}`}>
         <body className="min-h-screen antialiased">
           <TRPCProvider>{children}</TRPCProvider>
+          <Analytics />
         </body>
       </html>
     </ClerkProvider>

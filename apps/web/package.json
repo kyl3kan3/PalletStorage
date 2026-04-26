@@ -17,6 +17,7 @@
     "@trpc/next": "^11.0.0-rc.648",
     "@trpc/react-query": "^11.0.0-rc.648",
     "@trpc/server": "^11.0.0-rc.648",
+    "@vercel/analytics": "^2.0.1",
     "@wms/api": "workspace:*",
     "@wms/core": "workspace:*",
     "@wms/db": "workspace:*",
