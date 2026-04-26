@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState } from "react";
+import { useRouter } from "next/navigation";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
@@ -25,6 +26,13 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
     onSuccess: () => {
       utils.outbound.byId.invalidate({ id });
       utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
+    },
+  });
+  const router = useRouter();
+  const deleteOrder = trpc.outbound.delete.useMutation({
+    onSuccess: () => {
+      utils.outbound.list.invalidate();
+      router.push("/outbound");
     },
   });
   const pack = trpc.outbound.pack.useMutation({
@@ -777,6 +785,43 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
             {cancelOrder.error && (
               <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
                 {cancelOrder.error.message}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+      {isManager && status !== "shipped" && (
+        <div style={{ marginTop: 16 }}>
+          <Card t={t}>
+            <div style={{ fontWeight: 600, color: t.ink, marginBottom: 4 }}>
+              Delete order
+            </div>
+            <div style={{ fontSize: 12, color: t.muted, marginBottom: 10 }}>
+              Permanently removes the order, its lines, and any pending
+              picks/shipments. Refused if any pick is already complete (use
+              cancel + reason to preserve the audit trail).
+            </div>
+            <Btn
+              t={t}
+              variant="danger"
+              size="md"
+              icon={Ic.X}
+              disabled={deleteOrder.isPending}
+              onClick={() => {
+                if (
+                  confirm(
+                    "Delete this outbound order permanently? This can't be undone.",
+                  )
+                ) {
+                  deleteOrder.mutate({ id });
+                }
+              }}
+            >
+              {deleteOrder.isPending ? "Deleting…" : "Delete order"}
+            </Btn>
+            {deleteOrder.error && (
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+                {deleteOrder.error.message}
               </div>
             )}
           </Card>

@@ -561,4 +561,74 @@ export const outboundRouter = router({
         return { ok: true };
       });
     }),
+
+  /**
+   * Hard delete an outbound order and everything that cascades from
+   * it (lines, picks, shipments). Used to clean up mistaken/abandoned
+   * orders. Refuses on shipped orders (preserves audit trail) or
+   * orders that already have completed picks (inventory state would
+   * diverge from reality — pallets were physically moved). For those,
+   * use cancel instead.
+   */
+  delete: managerProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select({ status: schema.outboundOrders.status })
+          .from(schema.outboundOrders)
+          .where(
+            and(
+              eq(schema.outboundOrders.id, input.id),
+              eq(schema.outboundOrders.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!order) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        }
+        if (order.status === "shipped") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Cannot delete a shipped order — cancel & reverse shipment instead.",
+          });
+        }
+        // Refuse if any pick has been completed against this order
+        // (inventory has physically moved; we'd leave it stranded).
+        const completed = await tx
+          .select({ id: schema.picks.id })
+          .from(schema.picks)
+          .innerJoin(
+            schema.outboundLines,
+            eq(schema.outboundLines.id, schema.picks.outboundLineId),
+          )
+          .where(
+            and(
+              eq(schema.picks.organizationId, orgId),
+              eq(schema.outboundLines.outboundOrderId, input.id),
+              isNotNull(schema.picks.completedAt),
+            ),
+          )
+          .limit(1);
+        if (completed.length > 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "This order has completed picks — inventory has moved. Cancel it (reason required) instead so the audit trail is preserved.",
+          });
+        }
+        // FK cascade handles lines, shipments. Picks cascade through
+        // outbound_lines → outbound_orders.
+        await tx
+          .delete(schema.outboundOrders)
+          .where(
+            and(
+              eq(schema.outboundOrders.id, input.id),
+              eq(schema.outboundOrders.organizationId, orgId),
+            ),
+          );
+        return { ok: true };
+      });
+    }),
 });
