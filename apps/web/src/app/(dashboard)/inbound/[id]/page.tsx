@@ -26,6 +26,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const removeLine = trpc.inbound.removeLine.useMutation({ onSuccess: invalidate });
   const createPallet = trpc.pallet.create.useMutation();
   const receiveLine = trpc.inbound.receiveLine.useMutation({ onSuccess: invalidate });
+  const movePallet = trpc.pallet.move.useMutation();
 
   const exportInbound = trpc.quickbooks.exportInbound.useMutation();
   const qbStatus = trpc.quickbooks.status.useQuery();
@@ -110,6 +111,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const [receiveQty, setReceiveQty] = useState(1);
   const [receiveLot, setReceiveLot] = useState("");
   const [receiveExpiry, setReceiveExpiry] = useState("");
+  const [receivePutawayId, setReceivePutawayId] = useState("");
   const [receiveErr, setReceiveErr] = useState<string | null>(null);
 
   async function handleReceive(lineId: string) {
@@ -127,10 +129,22 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         lot: receiveLot.trim() || undefined,
         expiry: receiveExpiry ? new Date(receiveExpiry) : undefined,
       });
+      // Optional one-step putaway: if the user picked a rack, move
+      // the freshly-received pallet straight there with reason
+      // 'putaway'. Sets pallet.status='stored' so it becomes
+      // pickable for outbound orders without a separate trip.
+      if (receivePutawayId) {
+        await movePallet.mutateAsync({
+          palletId: pallet.id,
+          toLocationId: receivePutawayId,
+          reason: "putaway",
+        });
+      }
       setReceivingLineId(null);
       setReceiveQty(1);
       setReceiveLot("");
       setReceiveExpiry("");
+      setReceivePutawayId("");
     } catch (e) {
       setReceiveErr(e instanceof Error ? e.message : "Receive failed");
     }
@@ -529,6 +543,44 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                       onChange={(e) => setReceiveExpiry(e.target.value)}
                     />
                   </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: t.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Put away to (optional)
+                    </span>
+                    <select
+                      value={receivePutawayId}
+                      onChange={(e) => setReceivePutawayId(e.target.value)}
+                      style={{
+                        padding: "9px 14px",
+                        borderRadius: 12,
+                        background: t.surfaceAlt,
+                        border: `1.5px solid ${t.border}`,
+                        fontSize: 13.5,
+                        color: t.ink,
+                        cursor: "pointer",
+                        minWidth: 180,
+                      }}
+                    >
+                      <option value="">Stay on dock</option>
+                      {locations.data
+                        ?.filter((loc) => loc.type === "rack")
+                        .slice()
+                        .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))
+                        .map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.code}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
                   <Btn
                     t={t}
                     type="button"
@@ -538,11 +590,12 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                     disabled={
                       receiveQty < 1 ||
                       createPallet.isPending ||
-                      receiveLine.isPending
+                      receiveLine.isPending ||
+                      movePallet.isPending
                     }
                     onClick={() => handleReceive(l.id)}
                   >
-                    {createPallet.isPending || receiveLine.isPending
+                    {createPallet.isPending || receiveLine.isPending || movePallet.isPending
                       ? "Saving…"
                       : "Confirm receive"}
                   </Btn>
