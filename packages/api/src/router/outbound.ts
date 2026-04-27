@@ -563,6 +563,81 @@ export const outboundRouter = router({
     }),
 
   /**
+   * Per-product inventory breakdown for an outbound order. Used by
+   * the UI when generatePicks returns zero allocations to explain
+   * exactly why — usually one of: nothing received yet, received but
+   * not put away (status='received', pallets on the dock), or stock
+   * exists but in a different warehouse than the order targets.
+   */
+  checkInventory: tenantProcedure
+    .input(z.object({ outboundOrderId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const [order] = await ctx.db
+        .select({
+          warehouseId: schema.outboundOrders.warehouseId,
+        })
+        .from(schema.outboundOrders)
+        .where(
+          and(
+            eq(schema.outboundOrders.id, input.outboundOrderId),
+            eq(schema.outboundOrders.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const lines = await ctx.db
+        .select({
+          productId: schema.outboundLines.productId,
+          productSku: schema.products.sku,
+          productName: schema.products.name,
+          qtyOrdered: schema.outboundLines.qtyOrdered,
+          qtyPicked: schema.outboundLines.qtyPicked,
+        })
+        .from(schema.outboundLines)
+        .innerJoin(schema.products, eq(schema.products.id, schema.outboundLines.productId))
+        .where(eq(schema.outboundLines.outboundOrderId, input.outboundOrderId));
+
+      // For each line's product, sum pallet_items qty grouped by
+      // pallet status, restricted to the order's warehouse.
+      const breakdowns = await Promise.all(
+        lines.map(async (l) => {
+          const rows = await ctx.db
+            .select({
+              status: schema.pallets.status,
+              total: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+            })
+            .from(schema.palletItems)
+            .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+            .where(
+              and(
+                eq(schema.palletItems.organizationId, orgId),
+                eq(schema.palletItems.productId, l.productId),
+                eq(schema.pallets.warehouseId, order.warehouseId),
+              ),
+            )
+            .groupBy(schema.pallets.status);
+          const byStatus: Record<string, number> = {};
+          for (const r of rows) byStatus[r.status] = r.total;
+          return {
+            productId: l.productId,
+            productSku: l.productSku,
+            productName: l.productName,
+            qtyOrdered: l.qtyOrdered,
+            qtyPicked: l.qtyPicked,
+            stored: byStatus.stored ?? 0,
+            received: byStatus.received ?? 0,
+            inTransit: byStatus.in_transit ?? 0,
+            picked: byStatus.picked ?? 0,
+            damaged: byStatus.damaged ?? 0,
+          };
+        }),
+      );
+      return { warehouseId: order.warehouseId, lines: breakdowns };
+    }),
+
+  /**
    * Hard delete an outbound order and everything that cascades from
    * it (lines, picks, shipments). Used to clean up mistaken/abandoned
    * orders. Refuses on shipped orders (preserves audit trail) or

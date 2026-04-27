@@ -35,6 +35,11 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
       router.push("/outbound");
     },
   });
+  // Inventory diagnostic — only fetches when needed (zero-pick result).
+  const inventoryCheck = trpc.outbound.checkInventory.useQuery(
+    { outboundOrderId: id },
+    { enabled: genPicks.data?.created === 0 },
+  );
   const pack = trpc.outbound.pack.useMutation({
     onSuccess: () => utils.outbound.byId.invalidate({ id }),
   });
@@ -753,10 +758,53 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
             No stock to allocate.
           </div>
-          The allocator couldn&apos;t find any stored pallets matching the
-          products on this order. Receive an inbound order with the
-          right products first, then click Generate again — the order
-          stayed in its current status so you can retry.
+          <div style={{ marginBottom: 8 }}>
+            The allocator couldn&apos;t find any stored pallets matching the
+            products on this order in this warehouse.
+          </div>
+          {inventoryCheck.data && (
+            <div
+              style={{
+                marginTop: 8,
+                background: "rgba(255,255,255,0.6)",
+                color: t.body,
+                borderRadius: 8,
+                padding: 8,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 4, color: t.ink }}>
+                Per-product inventory in this warehouse:
+              </div>
+              {inventoryCheck.data.lines.map((l) => {
+                const remaining = l.qtyOrdered - l.qtyPicked;
+                let advice = "";
+                if (l.stored >= remaining) {
+                  advice = "should be allocatable — try Generate again";
+                } else if (l.stored > 0) {
+                  advice = `only ${l.stored} stored, need ${remaining} — receive more`;
+                } else if (l.received > 0) {
+                  advice = `${l.received} received but on the dock — put away to a rack first`;
+                } else if (l.inTransit > 0) {
+                  advice = `${l.inTransit} in transit, none received yet`;
+                } else {
+                  advice = "no pallets — receive an inbound for this product first";
+                }
+                return (
+                  <div key={l.productId} style={{ marginTop: 4 }}>
+                    <span style={{ fontFamily: FONTS.mono, fontWeight: 600 }}>
+                      {l.productSku ? `${l.productSku} — ${l.productName}` : l.productName}
+                    </span>
+                    <div style={{ marginLeft: 6 }}>
+                      need {remaining} · stored {l.stored} · received{" "}
+                      {l.received} · in_transit {l.inTransit} —{" "}
+                      <em>{advice}</em>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       {canCancel && (
