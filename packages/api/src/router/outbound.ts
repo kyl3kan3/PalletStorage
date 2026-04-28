@@ -648,15 +648,18 @@ export const outboundRouter = router({
               schema.warehouses.name,
             );
 
-          // Diagnostic 3: another product with the SAME NAME exists in
-          // the catalog and HAS stored stock — likely the user
-          // duplicated a product when creating the order via the
-          // inline modal.
+          // Diagnostic 3: another product with a name MATCHING this
+          // line's product (case-insensitive, trimmed) exists in the
+          // catalog. Surface duplicates even when they have zero
+          // stock — the user often wants to know they exist so they
+          // can clean up the catalog or fix the order line.
           const duplicates = await ctx.db
             .select({
               productId: schema.products.id,
+              productName: schema.products.name,
               sku: schema.products.sku,
-              stored: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+              stored: sql<number>`coalesce(sum(case when ${schema.pallets.status} = 'stored' then ${schema.palletItems.qty} else 0 end),0)::int`,
+              total: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
             })
             .from(schema.products)
             .leftJoin(
@@ -670,11 +673,15 @@ export const outboundRouter = router({
             .where(
               and(
                 eq(schema.products.organizationId, orgId),
-                eq(schema.products.name, l.productName),
+                sql`lower(trim(${schema.products.name})) = lower(trim(${l.productName}))`,
                 ne(schema.products.id, l.productId),
               ),
             )
-            .groupBy(schema.products.id, schema.products.sku);
+            .groupBy(
+              schema.products.id,
+              schema.products.name,
+              schema.products.sku,
+            );
 
           return {
             productId: l.productId,
@@ -688,7 +695,9 @@ export const outboundRouter = router({
             picked: byStatus.picked ?? 0,
             damaged: byStatus.damaged ?? 0,
             elsewhere: elsewhere.filter((e) => e.total > 0),
-            duplicates: duplicates.filter((d) => d.stored > 0),
+            // Keep ALL duplicates (even zero-stock) so the user sees
+            // catalog duplication that's the root cause of mismatch.
+            duplicates,
           };
         }),
       );

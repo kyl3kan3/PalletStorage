@@ -778,6 +778,9 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
               </div>
               {inventoryCheck.data.lines.map((l) => {
                 const remaining = l.qtyOrdered - l.qtyPicked;
+                const duplicateWithStock = l.duplicates.some(
+                  (d) => d.stored > 0 || d.total > 0,
+                );
                 let advice = "";
                 if (l.stored >= remaining) {
                   advice = "should be allocatable — try Generate again";
@@ -789,8 +792,10 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   advice = `${l.inTransit} in transit, none received yet`;
                 } else if (l.elsewhere.length > 0) {
                   advice = `stored in another warehouse (${l.elsewhere.map((e) => `${e.warehouseCode}:${e.total}`).join(", ")}) — order is for a different warehouse`;
+                } else if (duplicateWithStock) {
+                  advice = "looks like a duplicate product holds the stock — see details below";
                 } else if (l.duplicates.length > 0) {
-                  advice = "looks like a duplicate product — see details below";
+                  advice = `no pallets, but ${l.duplicates.length} other product${l.duplicates.length > 1 ? "s" : ""} share this name — see details below`;
                 } else {
                   advice = "no pallets — receive an inbound for this product first";
                 }
