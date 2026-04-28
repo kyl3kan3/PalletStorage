@@ -841,6 +841,66 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   </div>
                 );
               })}
+              {inventoryCheck.data.warehouseInventory.length > 0 && (
+                <details style={{ marginTop: 10 }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: t.ink,
+                    }}
+                  >
+                    Show all inventory in this warehouse (
+                    {inventoryCheck.data.warehouseInventory.length} product
+                    {inventoryCheck.data.warehouseInventory.length === 1
+                      ? ""
+                      : "s"}
+                    )
+                  </summary>
+                  <div style={{ marginTop: 6 }}>
+                    {inventoryCheck.data.warehouseInventory.map((r) => (
+                      <div
+                        key={r.productId}
+                        style={{
+                          fontFamily: FONTS.mono,
+                          fontSize: 11.5,
+                          marginTop: 2,
+                        }}
+                      >
+                        {r.productSku ? `${r.productSku} — ` : ""}
+                        {r.productName} — stored {r.stored} · received{" "}
+                        {r.received} · id {r.productId.slice(0, 8)}
+                      </div>
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: t.muted,
+                      fontStyle: "italic",
+                    }}
+                  >
+                    If the product on this order doesn&apos;t match any of
+                    these names exactly, edit the order line to use the
+                    matching product.
+                  </div>
+                </details>
+              )}
+              {inventoryCheck.data.warehouseInventory.length === 0 && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 11.5,
+                    color: t.muted,
+                    fontStyle: "italic",
+                  }}
+                >
+                  This warehouse has zero pallets in any status. The receive
+                  flow probably never created a pallet — re-open the inbound
+                  order and check that its line shows received &gt; 0.
+                </div>
+              )}
             </div>
           )}
         </div>

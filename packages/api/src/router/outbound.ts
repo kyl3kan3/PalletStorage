@@ -701,7 +701,38 @@ export const outboundRouter = router({
           };
         }),
       );
-      return { warehouseId: order.warehouseId, lines: breakdowns };
+      // Full inventory dump for this warehouse, regardless of what's
+      // on the order — useful when the diagnostic above can't find a
+      // match and the user wants to see what they actually have. Shows
+      // every product that has at least one pallet in any status, so
+      // they can spot 'oh, my receive landed under "vanilla extract"
+      // instead of "Vanilla"'.
+      const warehouseInventory = await ctx.db
+        .select({
+          productId: schema.products.id,
+          productSku: schema.products.sku,
+          productName: schema.products.name,
+          stored: sql<number>`coalesce(sum(case when ${schema.pallets.status} = 'stored' then ${schema.palletItems.qty} else 0 end),0)::int`,
+          received: sql<number>`coalesce(sum(case when ${schema.pallets.status} = 'received' then ${schema.palletItems.qty} else 0 end),0)::int`,
+          total: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+        })
+        .from(schema.palletItems)
+        .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+        .innerJoin(schema.products, eq(schema.products.id, schema.palletItems.productId))
+        .where(
+          and(
+            eq(schema.palletItems.organizationId, orgId),
+            eq(schema.pallets.warehouseId, order.warehouseId),
+          ),
+        )
+        .groupBy(schema.products.id, schema.products.sku, schema.products.name)
+        .orderBy(schema.products.name);
+
+      return {
+        warehouseId: order.warehouseId,
+        lines: breakdowns,
+        warehouseInventory: warehouseInventory.filter((r) => r.total > 0),
+      };
     }),
 
   /**
