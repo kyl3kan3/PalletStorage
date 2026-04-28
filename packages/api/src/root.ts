@@ -15,6 +15,7 @@ import { taskRouter } from "./router/task";
 import { devRouter } from "./router/dev";
 import { customerRouter } from "./router/customer";
 import { supplierRouter } from "./router/supplier";
+import { inventoryRouter } from "./router/inventory";
 
 export const appRouter = router({
   organization: organizationRouter,
@@ -33,6 +34,7 @@ export const appRouter = router({
   dev: devRouter,
   customer: customerRouter,
   supplier: supplierRouter,
+  inventory: inventoryRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -37,6 +37,13 @@ export default function InventoryPage() {
           desc="Resolve a pallet LPN or location label to its record."
         />
         <Tile
+          href={"/inventory/stock" as Route}
+          icon={Ic.Boxes}
+          tint="mint"
+          title="Stock on hand"
+          desc="What the system thinks is in your warehouses — by product or by pallet."
+        />
+        <Tile
           href="/inventory/counts"
           icon={Ic.Clipboard}
           tint="sky"
