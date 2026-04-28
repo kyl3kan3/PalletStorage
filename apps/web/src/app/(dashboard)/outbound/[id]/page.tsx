@@ -787,11 +787,15 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   advice = `${l.received} received but on the dock — put away to a rack first`;
                 } else if (l.inTransit > 0) {
                   advice = `${l.inTransit} in transit, none received yet`;
+                } else if (l.elsewhere.length > 0) {
+                  advice = `stored in another warehouse (${l.elsewhere.map((e) => `${e.warehouseCode}:${e.total}`).join(", ")}) — order is for a different warehouse`;
+                } else if (l.duplicates.length > 0) {
+                  advice = "looks like a duplicate product — see details below";
                 } else {
                   advice = "no pallets — receive an inbound for this product first";
                 }
                 return (
-                  <div key={l.productId} style={{ marginTop: 4 }}>
+                  <div key={l.productId} style={{ marginTop: 6 }}>
                     <span style={{ fontFamily: FONTS.mono, fontWeight: 600 }}>
                       {l.productSku ? `${l.productSku} — ${l.productName}` : l.productName}
                     </span>
@@ -800,6 +804,35 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                       {l.received} · in_transit {l.inTransit} —{" "}
                       <em>{advice}</em>
                     </div>
+                    {l.duplicates.length > 0 && (
+                      <div
+                        style={{
+                          marginLeft: 6,
+                          marginTop: 4,
+                          padding: "6px 8px",
+                          background: t.coralSoft,
+                          borderRadius: 6,
+                          color: t.coral,
+                          fontSize: 11.5,
+                        }}
+                      >
+                        ⚠ Found {l.duplicates.length} other product
+                        {l.duplicates.length > 1 ? "s" : ""} also named &quot;
+                        {l.productName}&quot; with stored stock:
+                        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                          {l.duplicates.map((d) => (
+                            <li key={d.productId} style={{ fontFamily: FONTS.mono }}>
+                              {d.sku ?? "(no SKU)"} — {d.stored} stored — id{" "}
+                              {d.productId.slice(0, 8)}
+                            </li>
+                          ))}
+                        </ul>
+                        Likely cause: this order picked a freshly-created
+                        product with the same name as one you already had.
+                        Edit the order line to use the other product, or
+                        receive an inbound against THIS product.
+                      </div>
+                    )}
                   </div>
                 );
               })}

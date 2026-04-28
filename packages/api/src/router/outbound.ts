@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay } from "@wms/core";
@@ -620,6 +620,62 @@ export const outboundRouter = router({
             .groupBy(schema.pallets.status);
           const byStatus: Record<string, number> = {};
           for (const r of rows) byStatus[r.status] = r.total;
+
+          // Diagnostic 2: same product, but stored in a DIFFERENT
+          // warehouse — operator probably picked the wrong destination
+          // warehouse on the outbound.
+          const elsewhere = await ctx.db
+            .select({
+              total: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+              warehouseId: schema.pallets.warehouseId,
+              warehouseCode: schema.warehouses.code,
+              warehouseName: schema.warehouses.name,
+            })
+            .from(schema.palletItems)
+            .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+            .innerJoin(schema.warehouses, eq(schema.warehouses.id, schema.pallets.warehouseId))
+            .where(
+              and(
+                eq(schema.palletItems.organizationId, orgId),
+                eq(schema.palletItems.productId, l.productId),
+                eq(schema.pallets.status, "stored"),
+                ne(schema.pallets.warehouseId, order.warehouseId),
+              ),
+            )
+            .groupBy(
+              schema.pallets.warehouseId,
+              schema.warehouses.code,
+              schema.warehouses.name,
+            );
+
+          // Diagnostic 3: another product with the SAME NAME exists in
+          // the catalog and HAS stored stock — likely the user
+          // duplicated a product when creating the order via the
+          // inline modal.
+          const duplicates = await ctx.db
+            .select({
+              productId: schema.products.id,
+              sku: schema.products.sku,
+              stored: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`,
+            })
+            .from(schema.products)
+            .leftJoin(
+              schema.palletItems,
+              and(
+                eq(schema.palletItems.productId, schema.products.id),
+                eq(schema.palletItems.organizationId, orgId),
+              ),
+            )
+            .leftJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+            .where(
+              and(
+                eq(schema.products.organizationId, orgId),
+                eq(schema.products.name, l.productName),
+                ne(schema.products.id, l.productId),
+              ),
+            )
+            .groupBy(schema.products.id, schema.products.sku);
+
           return {
             productId: l.productId,
             productSku: l.productSku,
@@ -631,6 +687,8 @@ export const outboundRouter = router({
             inTransit: byStatus.in_transit ?? 0,
             picked: byStatus.picked ?? 0,
             damaged: byStatus.damaged ?? 0,
+            elsewhere: elsewhere.filter((e) => e.total > 0),
+            duplicates: duplicates.filter((d) => d.stored > 0),
           };
         }),
       );
