@@ -647,6 +647,9 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                 {products.data?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.sku ? `${p.sku} — ${p.name}` : p.name}
+                    {typeof p.storedQty === "number"
+                      ? ` (${p.storedQty} stored)`
+                      : ""}
                   </option>
                 ))}
               </Select>

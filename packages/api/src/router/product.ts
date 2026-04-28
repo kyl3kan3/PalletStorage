@@ -20,9 +20,41 @@ export const productRouter = router({
     .query(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
       const q = `%${input.q}%`;
+      // Subquery: stored pallet_items qty per product, scoped to the
+      // org. Lateral join keeps each product row at one row even when
+      // it has zero stock. We pass it through the LEFT JOIN so the
+      // returned shape is the product's columns + storedQty + total.
+      const stockAgg = ctx.db
+        .select({
+          productId: schema.palletItems.productId,
+          storedQty: sql<number>`coalesce(sum(case when ${schema.pallets.status} = 'stored' then ${schema.palletItems.qty} else 0 end),0)::int`.as(
+            "stored_qty",
+          ),
+          totalQty: sql<number>`coalesce(sum(${schema.palletItems.qty}),0)::int`.as(
+            "total_qty",
+          ),
+        })
+        .from(schema.palletItems)
+        .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
+        .where(eq(schema.palletItems.organizationId, orgId))
+        .groupBy(schema.palletItems.productId)
+        .as("stock");
       return ctx.db
-        .select()
+        .select({
+          id: schema.products.id,
+          organizationId: schema.products.organizationId,
+          sku: schema.products.sku,
+          name: schema.products.name,
+          barcode: schema.products.barcode,
+          weightKg: schema.products.weightKg,
+          velocityClass: schema.products.velocityClass,
+          unitPriceCents: schema.products.unitPriceCents,
+          createdAt: schema.products.createdAt,
+          storedQty: sql<number>`coalesce(${stockAgg.storedQty}, 0)::int`,
+          totalQty: sql<number>`coalesce(${stockAgg.totalQty}, 0)::int`,
+        })
         .from(schema.products)
+        .leftJoin(stockAgg, eq(stockAgg.productId, schema.products.id))
         .where(
           and(
             eq(schema.products.organizationId, orgId),
