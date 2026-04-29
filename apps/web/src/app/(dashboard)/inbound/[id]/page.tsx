@@ -26,7 +26,14 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const removeLine = trpc.inbound.removeLine.useMutation({ onSuccess: invalidate });
   const createPallet = trpc.pallet.create.useMutation();
   const receiveLine = trpc.inbound.receiveLine.useMutation({ onSuccess: invalidate });
-  const movePallet = trpc.pallet.move.useMutation();
+  const movePallet = trpc.pallet.move.useMutation({
+    onSuccess: () => {
+      utils.inbound.byId.invalidate({ id });
+      utils.inbound.palletsForOrder.invalidate({ inboundOrderId: id });
+    },
+  });
+  const pallets = trpc.inbound.palletsForOrder.useQuery({ inboundOrderId: id });
+  const [putawayChoice, setPutawayChoice] = useState<Record<string, string>>({});
 
   const exportInbound = trpc.quickbooks.exportInbound.useMutation();
   const qbStatus = trpc.quickbooks.status.useQuery();
@@ -727,6 +734,170 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
           )}
         </Card>
       </div>
+
+      {pallets.data && pallets.data.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: t.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              fontWeight: 600,
+              marginBottom: 10,
+            }}
+          >
+            Pallets received on this order
+          </div>
+          <Card t={t} padding={0}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "120px 110px 1fr 240px",
+                gap: 12,
+                padding: "10px 16px",
+                fontSize: 10.5,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+              }}
+            >
+              <div>Pallet (LPN)</div>
+              <div>Status</div>
+              <div>Location</div>
+              <div>Action</div>
+            </div>
+            {pallets.data.map((p) => {
+              const needsPutaway =
+                p.status === "received" || p.status === "in_transit";
+              return (
+                <div
+                  key={p.palletId}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "120px 110px 1fr 240px",
+                    gap: 12,
+                    padding: "10px 16px",
+                    borderTop: `1.5px dashed ${t.border}`,
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: FONTS.mono,
+                      fontSize: 12,
+                      color: t.ink,
+                    }}
+                  >
+                    {p.lpn}
+                  </span>
+                  <Tag
+                    t={t}
+                    tone={
+                      p.status === "stored"
+                        ? "mint"
+                        : p.status === "received"
+                          ? "primary"
+                          : "neutral"
+                    }
+                  >
+                    {p.status}
+                  </Tag>
+                  <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
+                    {p.locationCode ?? "—"}
+                  </span>
+                  <div>
+                    {needsPutaway ? (
+                      (locations.data ?? []).filter((l) => l.type === "rack").length >
+                      0 ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <select
+                            value={putawayChoice[p.palletId] ?? ""}
+                            onChange={(e) =>
+                              setPutawayChoice((prev) => ({
+                                ...prev,
+                                [p.palletId]: e.target.value,
+                              }))
+                            }
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              padding: "6px 8px",
+                              borderRadius: 8,
+                              background: t.surfaceAlt,
+                              border: `1.5px solid ${t.border}`,
+                              fontFamily: FONTS.mono,
+                              fontSize: 12,
+                              color: t.ink,
+                            }}
+                          >
+                            <option value="">— rack —</option>
+                            {(locations.data ?? [])
+                              .filter((l) => l.type === "rack")
+                              .slice()
+                              .sort((a, b) =>
+                                (a.code ?? "").localeCompare(b.code ?? ""),
+                              )
+                              .map((loc) => (
+                                <option key={loc.id} value={loc.id}>
+                                  {loc.code}
+                                </option>
+                              ))}
+                          </select>
+                          <Btn
+                            t={t}
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            icon={Ic.Check}
+                            disabled={
+                              !putawayChoice[p.palletId] ||
+                              movePallet.isPending
+                            }
+                            onClick={() =>
+                              movePallet.mutate({
+                                palletId: p.palletId,
+                                toLocationId: putawayChoice[p.palletId]!,
+                                reason: "putaway",
+                              })
+                            }
+                          >
+                            Put away
+                          </Btn>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 11, color: t.muted }}>
+                          No racks in this warehouse — set up rack
+                          locations first
+                        </span>
+                      )
+                    ) : (
+                      <span style={{ fontSize: 11, color: t.muted }}>
+                        —
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+          {movePallet.error && (
+            <div
+              style={{
+                marginTop: 8,
+                background: t.coralSoft,
+                color: t.coral,
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            >
+              {movePallet.error.message}
+            </div>
+          )}
+        </div>
+      )}
 
       {!isTerminal && !editing && isManager && (
         <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>

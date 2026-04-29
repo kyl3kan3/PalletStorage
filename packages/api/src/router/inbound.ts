@@ -265,6 +265,44 @@ export const inboundRouter = router({
       return { order, lines };
     }),
 
+  /**
+   * Pallets that came in against this order. Used by the inbound
+   * detail page to show what's been received and lets the user
+   * putaway anything still sitting on the dock.
+   */
+  palletsForOrder: tenantProcedure
+    .input(z.object({ inboundOrderId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      // Movements with refType=inbound_order point at the receive
+      // event — that's the link from a pallet back to an inbound.
+      return ctx.db
+        .selectDistinctOn([schema.pallets.id], {
+          palletId: schema.pallets.id,
+          lpn: schema.pallets.lpn,
+          status: schema.pallets.status,
+          currentLocationId: schema.pallets.currentLocationId,
+          locationCode: schema.locations.code,
+          locationType: schema.locations.type,
+          createdAt: schema.pallets.createdAt,
+        })
+        .from(schema.pallets)
+        .innerJoin(
+          schema.movements,
+          and(
+            eq(schema.movements.palletId, schema.pallets.id),
+            eq(schema.movements.refType, "inbound_order"),
+            eq(schema.movements.refId, input.inboundOrderId),
+          ),
+        )
+        .leftJoin(
+          schema.locations,
+          eq(schema.locations.id, schema.pallets.currentLocationId),
+        )
+        .where(eq(schema.pallets.organizationId, orgId))
+        .orderBy(schema.pallets.id);
+    }),
+
   receiveLine: tenantProcedure
     .input(
       z.object({
