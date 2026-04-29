@@ -107,7 +107,32 @@ export default function ImportInventoryPage() {
     setImagePreview(null);
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      const mime = (file.type || "").toLowerCase();
+      // MIME type wins because some downloads have odd / missing
+      // extensions (e.g. iOS share-sheet renames screenshots, or a
+      // file came in via clipboard). Fall back to extension only
+      // when MIME is empty.
+      const isImage =
+        mime.startsWith("image/") ||
+        /\.(png|jpe?g|webp|heic|heif|gif|bmp)$/i.test(lower);
+      const isPdf = mime === "application/pdf" || lower.endsWith(".pdf");
+      const isExcel =
+        mime.includes("spreadsheet") ||
+        mime === "application/vnd.ms-excel" ||
+        lower.endsWith(".xlsx") ||
+        lower.endsWith(".xls");
+      const isCsv =
+        mime === "text/csv" || lower.endsWith(".csv") || lower.endsWith(".txt");
+      if (isImage) {
+        const data = await fileToDataUrl(file);
+        // OpenAI vision only accepts PNG / JPEG. Re-encode anything
+        // else (webp, heic, gif…) to JPEG via canvas so the upload
+        // doesn't fail server-side.
+        const needsReencode = !mime.includes("png") && !mime.includes("jpeg") && !mime.includes("jpg");
+        const finalUrl = needsReencode ? await reencodeAsJpeg(data) : data;
+        setImageDataUrl(finalUrl);
+        setImagePreview(finalUrl);
+      } else if (isExcel) {
         const xlsx = await import("xlsx");
         const buf = await file.arrayBuffer();
         const wb = xlsx.read(buf, { type: "array" });
@@ -117,7 +142,7 @@ export default function ImportInventoryPage() {
           parts.push(xlsx.utils.sheet_to_csv(wb.Sheets[name]!));
         }
         setText(parts.join("\n"));
-      } else if (lower.endsWith(".pdf")) {
+      } else if (isPdf) {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
         const buf = await file.arrayBuffer();
@@ -148,23 +173,17 @@ export default function ImportInventoryPage() {
           setImageDataUrl(data);
           setImagePreview(data);
         }
-      } else if (
-        lower.endsWith(".png") ||
-        lower.endsWith(".jpg") ||
-        lower.endsWith(".jpeg") ||
-        lower.endsWith(".webp")
-      ) {
-        const data = await fileToDataUrl(file);
-        if (lower.endsWith(".webp")) {
-          const reencoded = await reencodeAsJpeg(data);
-          setImageDataUrl(reencoded);
-          setImagePreview(reencoded);
-        } else {
-          setImageDataUrl(data);
-          setImagePreview(data);
-        }
-      } else {
+      } else if (isCsv) {
         setText(await file.text());
+      } else {
+        // Unknown type — refuse rather than dumping raw bytes into
+        // the textarea (that's how users hit 'string too big' on
+        // image uploads with weird extensions).
+        throw new Error(
+          `Unsupported file type${
+            mime ? ` (${mime})` : ""
+          }. Use .xlsx, .csv, .pdf, or an image (.png / .jpg / .heic).`,
+        );
       }
     } catch (e) {
       setFileErr(e instanceof Error ? e.message : "Couldn't read that file.");
