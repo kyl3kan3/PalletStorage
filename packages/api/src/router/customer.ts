@@ -440,9 +440,23 @@ export const customerRouter = router({
             productCache.set(key, existing.id);
             continue;
           }
+          // Generate a placeholder SKU so the insert succeeds even if
+          // the org's DB hasn't run migration 0009 (which made sku
+          // nullable). User can edit it on /products afterward.
+          const slug = row.productName
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "-")
+            .slice(0, 24)
+            .replace(/^-+|-+$/g, "");
+          const placeholderSku = `IMP-${slug || "ITEM"}-${Date.now().toString(36).slice(-5)}`;
           const [created] = await tx
             .insert(schema.products)
-            .values({ organizationId: orgId, name: row.productName.trim() })
+            .values({
+              organizationId: orgId,
+              name: row.productName.trim(),
+              sku: placeholderSku,
+            })
             .returning({ id: schema.products.id });
           if (!created) throw new Error("Failed to create product");
           productCache.set(key, created.id);

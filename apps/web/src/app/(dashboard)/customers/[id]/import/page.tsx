@@ -53,6 +53,54 @@ export default function CustomerImportPage({
   const [rows, setRows] = useState<Row[] | null>(null);
   const [detectedRates, setDetectedRates] = useState<DetectedRates | undefined>();
   const [applyDetectedRates, setApplyDetectedRates] = useState(true);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileErr, setFileErr] = useState<string | null>(null);
+
+  /**
+   * Read an uploaded .xlsx / .csv / .pdf into a flat text blob and
+   * dump it into the textarea. Excel via SheetJS, PDF via pdfjs —
+   * both are dynamic-imported so they only ship to clients that
+   * actually upload a file. Plain CSV / TXT just decoded as utf-8.
+   */
+  async function handleFile(file: File) {
+    setFileErr(null);
+    setFileBusy(true);
+    try {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+        const xlsx = await import("xlsx");
+        const buf = await file.arrayBuffer();
+        const wb = xlsx.read(buf, { type: "array" });
+        const parts: string[] = [];
+        for (const sheetName of wb.SheetNames) {
+          parts.push(`--- ${sheetName} ---`);
+          parts.push(xlsx.utils.sheet_to_csv(wb.Sheets[sheetName]!));
+        }
+        setText(parts.join("\n"));
+      } else if (lower.endsWith(".pdf")) {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+        const buf = await file.arrayBuffer();
+        const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+        const parts: string[] = [];
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const textContent = await page.getTextContent();
+          const lineText = textContent.items
+            .map((it) => ("str" in it ? it.str : ""))
+            .join(" ");
+          parts.push(lineText);
+        }
+        setText(parts.join("\n"));
+      } else {
+        setText(await file.text());
+      }
+    } catch (e) {
+      setFileErr(e instanceof Error ? e.message : "Couldn't read that file.");
+    } finally {
+      setFileBusy(false);
+    }
+  }
 
   // Default the warehouse to the only one if there's just a single site.
   useMemo(() => {
@@ -87,11 +135,70 @@ export default function CustomerImportPage({
       />
 
       <Card t={t}>
-        <SectionLabel>1. Paste sheet text</SectionLabel>
+        <SectionLabel>1. Upload or paste the sheet</SectionLabel>
         <p style={{ fontSize: 12.5, color: t.muted, margin: "0 0 10px" }}>
-          Copy the relevant cells (header rows + data rows) directly out of
-          Excel or Google Sheets and paste below. Tab- or comma-separated.
+          Drop in an Excel file (.xlsx), CSV, or PDF — we&apos;ll extract the
+          text in your browser and feed it to the AI. You can also paste cells
+          directly from Excel or Google Sheets.
         </p>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 10,
+          }}
+        >
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 14px",
+              borderRadius: 12,
+              background: t.primary,
+              color: t.primaryText,
+              border: `1.5px solid ${t.primary}`,
+              fontSize: 13.5,
+              fontWeight: 600,
+              fontFamily: FONTS.sans,
+              cursor: fileBusy ? "progress" : "pointer",
+              opacity: fileBusy ? 0.6 : 1,
+            }}
+          >
+            <Ic.Upload size={16} />
+            {fileBusy ? "Reading…" : "Upload file"}
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,.txt,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              disabled={fileBusy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+              style={{ display: "none" }}
+            />
+          </label>
+          <span style={{ fontSize: 11, color: t.muted }}>
+            .xlsx · .csv · .pdf · or paste cells below
+          </span>
+        </div>
+        {fileErr && (
+          <div
+            style={{
+              marginBottom: 10,
+              background: t.coralSoft,
+              color: t.coral,
+              padding: "8px 12px",
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+          >
+            {fileErr}
+          </div>
+        )}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
