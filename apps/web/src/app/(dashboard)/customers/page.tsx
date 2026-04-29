@@ -29,11 +29,23 @@ export default function CustomersPage() {
         title="Customers"
         subtitle="Companies whose pallets you store. Link them on inbound and outbound orders to track per-client activity."
         right={
-          <Link href="/customers/new" style={{ textDecoration: "none" }}>
-            <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
-              New customer
-            </Btn>
-          </Link>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isManager && (
+              <Link
+                href={"/customers/import" as Route}
+                style={{ textDecoration: "none" }}
+              >
+                <Btn t={t} variant="secondary" size="md" icon={Ic.Upload}>
+                  Import sheet
+                </Btn>
+              </Link>
+            )}
+            <Link href="/customers/new" style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
+                New customer
+              </Btn>
+            </Link>
+          </div>
         }
       />
 
