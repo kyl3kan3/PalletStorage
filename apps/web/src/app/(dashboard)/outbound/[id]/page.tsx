@@ -318,16 +318,33 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                 {
                   n: 5,
                   title: "Close & invoice",
-                  sub: qbStatus.data?.connected
-                    ? "Export invoice to QuickBooks"
-                    : "QuickBooks not connected — settings → integrations",
-                  state: status === "shipped" ? "current" : "upcoming",
+                  sub:
+                    status !== "shipped"
+                      ? "Ship the order first (step 4)"
+                      : !qbStatus.data?.connected
+                        ? "QuickBooks not connected — Settings → Integrations"
+                        : exportOutbound.data
+                          ? `Exported as Invoice ${exportOutbound.data.qboId}`
+                          : "Export invoice to QuickBooks",
+                  state:
+                    status === "shipped" && exportOutbound.data
+                      ? "done"
+                      : status === "shipped"
+                        ? "current"
+                        : "upcoming",
                   action: (
                     <Btn
                       t={t}
                       variant={status === "shipped" ? "accent" : "secondary"}
                       size="sm"
                       icon={Ic.Dollar}
+                      title={
+                        status !== "shipped"
+                          ? "Order must be shipped before invoicing"
+                          : !qbStatus.data?.connected
+                            ? "Connect QuickBooks under Settings → Integrations"
+                            : ""
+                      }
                       disabled={
                         !qbStatus.data?.connected ||
                         exportOutbound.isPending ||
