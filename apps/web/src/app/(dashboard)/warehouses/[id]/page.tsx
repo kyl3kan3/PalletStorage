@@ -37,6 +37,9 @@ export default function WarehouseDetailPage({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
   const detect = trpc.location.detectAislesFromMap.useMutation();
+  const createLocation = trpc.location.create.useMutation({
+    onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
+  });
   const clearAllPins = trpc.location.clearAllMapPins.useMutation({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
@@ -90,6 +93,13 @@ export default function WarehouseDetailPage({
   const [baysPerAisle, setBaysPerAisle] = useState(20);
   const [levelsPerBay, setLevelsPerBay] = useState(4);
   const [positionsPerLevel, setPositionsPerLevel] = useState(2);
+
+  // Quick-add for dock + staging zones (the bays where pallets land
+  // after picking before they're loaded onto a truck). Distinct from
+  // racks so the outbound complete-pick flow can list these as staging
+  // candidates.
+  const [zoneCode, setZoneCode] = useState("");
+  const [zoneType, setZoneType] = useState<"dock" | "staging" | "floor">("staging");
 
   const [mapUrl, setMapUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -610,6 +620,135 @@ export default function WarehouseDetailPage({
               {bulk.error.message}
             </div>
           )}
+        </Section>
+
+        <Section title="Dock & staging zones">
+          <p style={{ fontSize: 13.5, color: t.body, margin: "0 0 14px" }}>
+            Non-rack locations like dock doors and staging bins.
+            Outbound picks need at least one staging or dock spot to
+            move pallets to before they ship — add them here.
+          </p>
+          {(() => {
+            const zones = (locations.data ?? [])
+              .filter(
+                (l) => l.type === "dock" || l.type === "staging" || l.type === "floor",
+              )
+              .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
+            return (
+              <>
+                {zones.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {zones.map((z) => (
+                      <span
+                        key={z.id}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                          background: t.surfaceAlt,
+                          border: `1.5px solid ${t.border}`,
+                          fontFamily: FONTS.mono,
+                          fontSize: 12,
+                          color: t.body,
+                        }}
+                      >
+                        {z.code}{" "}
+                        <span
+                          style={{
+                            color: t.muted,
+                            fontSize: 10.5,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.4,
+                          }}
+                        >
+                          {z.type}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div
+                  data-collapse-grid
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 140px auto",
+                    gap: 10,
+                  }}
+                >
+                  <TextField
+                    t={t}
+                    value={zoneCode}
+                    onChange={(e) => setZoneCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. DOCK-1, STG-A"
+                  />
+                  <select
+                    value={zoneType}
+                    onChange={(e) =>
+                      setZoneType(e.target.value as "dock" | "staging" | "floor")
+                    }
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 12,
+                      background: t.surfaceAlt,
+                      border: `1.5px solid ${t.border}`,
+                      fontSize: 13.5,
+                      color: t.ink,
+                      fontFamily: FONTS.sans,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="staging">Staging</option>
+                    <option value="dock">Dock</option>
+                    <option value="floor">Floor</option>
+                  </select>
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="accent"
+                    size="md"
+                    icon={Ic.Plus}
+                    disabled={!zoneCode.trim() || createLocation.isPending}
+                    onClick={() => {
+                      const code = zoneCode.trim();
+                      createLocation.mutate(
+                        {
+                          warehouseId: id,
+                          code,
+                          path: code,
+                          type: zoneType,
+                        },
+                        {
+                          onSuccess: () => setZoneCode(""),
+                        },
+                      );
+                    }}
+                  >
+                    {createLocation.isPending ? "Adding…" : "Add zone"}
+                  </Btn>
+                </div>
+                {createLocation.error && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      background: t.coralSoft,
+                      color: t.coral,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                  >
+                    {createLocation.error.message}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </Section>
 
         <Section title="Floor map (PDF)">
