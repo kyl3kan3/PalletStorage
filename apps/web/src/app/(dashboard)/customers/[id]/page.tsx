@@ -62,16 +62,26 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         right={
           c?.active ? (
             isManager ? (
-              <Btn
-                t={t}
-                variant="secondary"
-                size="sm"
-                icon={Ic.X}
-                disabled={deactivate.isPending}
-                onClick={() => deactivate.mutate({ id })}
-              >
-                {deactivate.isPending ? "Deactivating…" : "Deactivate"}
-              </Btn>
+              <div style={{ display: "flex", gap: 8 }}>
+                <a
+                  href={`/customers/${id}/import`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Btn t={t} variant="secondary" size="sm" icon={Ic.Upload}>
+                    Import sheet
+                  </Btn>
+                </a>
+                <Btn
+                  t={t}
+                  variant="secondary"
+                  size="sm"
+                  icon={Ic.X}
+                  disabled={deactivate.isPending}
+                  onClick={() => deactivate.mutate({ id })}
+                >
+                  {deactivate.isPending ? "Deactivating…" : "Deactivate"}
+                </Btn>
+              </div>
             ) : null
           ) : (
             <Tag t={t} tone="neutral">
