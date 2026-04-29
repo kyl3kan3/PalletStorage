@@ -214,10 +214,21 @@ export const customerRouter = router({
    */
   parseInventorySheet: managerProcedure
     .input(
-      z.object({
-        customerId: z.string().uuid(),
-        text: z.string().trim().min(1).max(40_000),
-      }),
+      z
+        .object({
+          customerId: z.string().uuid().optional(),
+          // Either text (paste / .xlsx / .pdf extract) or an image
+          // data URL (phone photo / scan). At least one must be set.
+          text: z.string().trim().max(40_000).optional(),
+          imageDataUrl: z
+            .string()
+            .regex(/^data:image\/(png|jpeg);base64,/)
+            .optional(),
+        })
+        .refine(
+          (v) => Boolean(v.text || v.imageDataUrl),
+          "Provide either text or imageDataUrl",
+        ),
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
@@ -228,23 +239,33 @@ export const customerRouter = router({
           message: "OPENAI_API_KEY not set on the server.",
         });
       }
-      const [customer] = await ctx.db
-        .select({ id: schema.customers.id, name: schema.customers.name })
-        .from(schema.customers)
-        .where(
-          and(
-            eq(schema.customers.id, input.customerId),
-            eq(schema.customers.organizationId, orgId),
-          ),
-        )
-        .limit(1);
-      if (!customer) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+
+      let knownCustomerName: string | undefined;
+      if (input.customerId) {
+        const [existing] = await ctx.db
+          .select({ id: schema.customers.id, name: schema.customers.name })
+          .from(schema.customers)
+          .where(
+            and(
+              eq(schema.customers.id, input.customerId),
+              eq(schema.customers.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!existing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+        }
+        knownCustomerName = existing.name;
       }
 
       const prompt = [
-        `You are extracting inventory data from a 3PL warehouse spreadsheet for the customer "${customer.name}".`,
-        "The text below is a pasted Excel/CSV snippet. Each meaningful row represents ONE pallet of stock.",
+        knownCustomerName
+          ? `You are extracting inventory data from a 3PL warehouse spreadsheet for the customer "${knownCustomerName}".`
+          : "You are extracting inventory data from a 3PL warehouse spreadsheet. The customer (the 3PL client whose stock this is) is identified by the sheet itself — extract their info too.",
+        "The text below is a pasted Excel/CSV snippet. Each meaningful pallet row represents ONE pallet of stock.",
+        knownCustomerName
+          ? ""
+          : "DETECT THE CUSTOMER (the company whose pallets are being stored) from headers / titles. Common patterns: a company name + email at the top, sometimes a 'bill to' or 'for' label. The 'pay to' / 'remit to' address is usually the WAREHOUSE — NOT the customer — so skip that. Return their info under detectedCustomer with whatever fields are visible: name, contactName, email, phone, billingLine1, billingLine2, billingCity, billingRegion, billingPostalCode, billingCountry. If the sheet doesn't show an address for the customer, omit those fields.",
         "Pull these fields per row when present:",
         '  - productName: the product label (strip leading "#1 - " or "#2 - " pallet numbering — keep just the product part, e.g. "Rocky Mountains" or "Vanilla pwbs")',
         "  - qty: integer number of items on the pallet (default 1 if not given)",
@@ -256,13 +277,33 @@ export const customerRouter = router({
         "  - storageRateCentsPerPalletMonth: e.g. '$22.00/per pallet per month' -> 2200",
         "  - receiveRateCentsPerPallet: e.g. 'handling fee per pallet' -> 2200",
         "  - shipRateCentsPerPallet: omit if not stated (3PLs often only charge the handling fee on the way in)",
-        "Skip header rows, total rows, blank rows, and rows that are clearly metadata (address, email, etc.).",
-        'Return strict JSON: {"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}',
+        "Skip header rows, total rows, blank rows, and metadata that isn't customer info.",
+        knownCustomerName
+          ? 'Return strict JSON: {"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}'
+          : 'Return strict JSON: {"detectedCustomer":{"name":"...","email":"...","billingLine1":"...","billingCity":"...","billingRegion":"...","billingPostalCode":"...","billingCountry":"..."},"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}',
         "Omit fields whose value is unknown rather than guessing.",
-        "",
-        "SHEET TEXT:",
-        input.text,
-      ].join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      // Multimodal content. Always include the prompt; append the
+      // sheet text and/or the image as separate parts so vision can
+      // read the image directly when the input was a photo or scan.
+      const messageContent: Array<Record<string, unknown>> = [
+        { type: "text", text: prompt },
+      ];
+      if (input.text && input.text.trim()) {
+        messageContent.push({
+          type: "text",
+          text: `SHEET TEXT:\n${input.text}`,
+        });
+      }
+      if (input.imageDataUrl) {
+        messageContent.push({
+          type: "image_url",
+          image_url: { url: input.imageDataUrl, detail: "high" },
+        });
+      }
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -273,7 +314,7 @@ export const customerRouter = router({
         body: JSON.stringify({
           model: "gpt-4o-mini",
           response_format: { type: "json_object" },
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content: messageContent }],
           max_tokens: 4000,
           temperature: 0,
         }),
@@ -290,7 +331,11 @@ export const customerRouter = router({
       };
       const content = payload.choices?.[0]?.message?.content ?? "";
 
-      let parsed: { detectedRates?: unknown; rows?: unknown[] };
+      let parsed: {
+        detectedCustomer?: unknown;
+        detectedRates?: unknown;
+        rows?: unknown[];
+      };
       try {
         parsed = JSON.parse(content);
       } catch {
@@ -349,7 +394,45 @@ export const customerRouter = router({
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);
-      return { detectedRates: rates, rows };
+      const detectedCustomer = (() => {
+        if (!parsed.detectedCustomer || typeof parsed.detectedCustomer !== "object") return undefined;
+        const o = parsed.detectedCustomer as Record<string, unknown>;
+        const name = cleanStr(o.name);
+        if (!name) return undefined;
+        return {
+          name,
+          contactName: cleanStr(o.contactName),
+          email: cleanStr(o.email, 320),
+          phone: cleanStr(o.phone, 64),
+          billingLine1: cleanStr(o.billingLine1),
+          billingLine2: cleanStr(o.billingLine2),
+          billingCity: cleanStr(o.billingCity, 100),
+          billingRegion: cleanStr(o.billingRegion, 100),
+          billingPostalCode: cleanStr(o.billingPostalCode, 32),
+          billingCountry: cleanStr(o.billingCountry, 100),
+        };
+      })();
+
+      // If the AI extracted a customer name but we already had one
+      // selected, the linked one wins — but we also surface any
+      // existing customer in the org with a similar name so the UI
+      // can offer a "match to existing" choice on the new path.
+      let existingMatch: { id: string; name: string } | undefined;
+      if (!input.customerId && detectedCustomer?.name) {
+        const [match] = await ctx.db
+          .select({ id: schema.customers.id, name: schema.customers.name })
+          .from(schema.customers)
+          .where(
+            and(
+              eq(schema.customers.organizationId, orgId),
+              ilike(schema.customers.name, detectedCustomer.name),
+            ),
+          )
+          .limit(1);
+        if (match) existingMatch = match;
+      }
+
+      return { detectedCustomer, detectedRates: rates, rows, existingMatch };
     }),
 
   /**
@@ -363,7 +446,23 @@ export const customerRouter = router({
   applyInventoryImport: managerProcedure
     .input(
       z.object({
-        customerId: z.string().uuid(),
+        // Either link to an existing customer OR pass new customer info to
+        // create one. Exactly one of customerId / customerInfo must be set.
+        customerId: z.string().uuid().optional(),
+        customerInfo: z
+          .object({
+            name: z.string().trim().min(1).max(200),
+            contactName: z.string().trim().max(200).optional(),
+            email: z.string().trim().max(320).optional(),
+            phone: z.string().trim().max(64).optional(),
+            billingLine1: z.string().trim().max(200).optional(),
+            billingLine2: z.string().trim().max(200).optional(),
+            billingCity: z.string().trim().max(100).optional(),
+            billingRegion: z.string().trim().max(100).optional(),
+            billingPostalCode: z.string().trim().max(32).optional(),
+            billingCountry: z.string().trim().max(100).optional(),
+          })
+          .optional(),
         warehouseId: z.string().uuid(),
         rows: z
           .array(
@@ -395,18 +494,70 @@ export const customerRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      // Verify customer + warehouse belong to caller's org.
-      const [customer] = await ctx.db
-        .select({ id: schema.customers.id })
-        .from(schema.customers)
-        .where(
-          and(
-            eq(schema.customers.id, input.customerId),
-            eq(schema.customers.organizationId, orgId),
-          ),
-        )
-        .limit(1);
-      if (!customer) throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+      if (!input.customerId && !input.customerInfo) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Provide either customerId or customerInfo.",
+        });
+      }
+      // Resolve the customer. customerId path: verify it belongs to
+      // org and use it. customerInfo path: try to match an existing
+      // customer by name (case-insensitive) — if found, link to that
+      // one; otherwise create a fresh row from the provided fields.
+      let resolvedCustomerId: string;
+      if (input.customerId) {
+        const [existing] = await ctx.db
+          .select({ id: schema.customers.id })
+          .from(schema.customers)
+          .where(
+            and(
+              eq(schema.customers.id, input.customerId),
+              eq(schema.customers.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!existing)
+          throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+        resolvedCustomerId = existing.id;
+      } else {
+        const info = input.customerInfo!;
+        const [match] = await ctx.db
+          .select({ id: schema.customers.id })
+          .from(schema.customers)
+          .where(
+            and(
+              eq(schema.customers.organizationId, orgId),
+              ilike(schema.customers.name, info.name),
+            ),
+          )
+          .limit(1);
+        if (match) {
+          resolvedCustomerId = match.id;
+        } else {
+          const [created] = await ctx.db
+            .insert(schema.customers)
+            .values({
+              organizationId: orgId,
+              name: info.name,
+              contactName: info.contactName ?? null,
+              email: info.email ?? null,
+              phone: info.phone ?? null,
+              billingLine1: info.billingLine1 ?? null,
+              billingLine2: info.billingLine2 ?? null,
+              billingCity: info.billingCity ?? null,
+              billingRegion: info.billingRegion ?? null,
+              billingPostalCode: info.billingPostalCode ?? null,
+              billingCountry: info.billingCountry ?? null,
+            })
+            .returning({ id: schema.customers.id });
+          if (!created)
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Failed to create customer",
+            });
+          resolvedCustomerId = created.id;
+        }
+      }
       const [warehouse] = await ctx.db
         .select({ id: schema.warehouses.id })
         .from(schema.warehouses)
@@ -476,7 +627,7 @@ export const customerRouter = router({
             .values({
               organizationId: orgId,
               warehouseId: input.warehouseId,
-              customerId: input.customerId,
+              customerId: resolvedCustomerId,
               lpn,
               status: outDate ? "shipped" : "stored",
             })
@@ -534,11 +685,11 @@ export const customerRouter = router({
             await tx
               .update(schema.customers)
               .set(patch)
-              .where(eq(schema.customers.id, input.customerId));
+              .where(eq(schema.customers.id, resolvedCustomerId));
           }
         }
 
-        return { palletsCreated, productsCreated };
+        return { palletsCreated, productsCreated, customerId: resolvedCustomerId };
       });
     }),
 });

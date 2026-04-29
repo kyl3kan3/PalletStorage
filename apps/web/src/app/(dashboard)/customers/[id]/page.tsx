@@ -64,7 +64,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             isManager ? (
               <div style={{ display: "flex", gap: 8 }}>
                 <a
-                  href={`/customers/${id}/import`}
+                  href={`/customers/import?customerId=${id}`}
                   style={{ textDecoration: "none" }}
                 >
                   <Btn t={t} variant="secondary" size="sm" icon={Ic.Upload}>

@@ -120,7 +120,7 @@ export default function CustomersPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    router.push(`/customers/${c.id}/import` as Route);
+                    router.push(`/customers/import?customerId=${c.id}` as Route);
                   }}
                   style={{
                     display: "inline-flex",
