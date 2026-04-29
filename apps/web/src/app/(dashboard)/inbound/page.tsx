@@ -35,11 +35,18 @@ export default function InboundListPage() {
         title="Inbound"
         subtitle="POs on the way in, plus what's already on the dock."
         right={
-          <Link href="/inbound/new" style={{ textDecoration: "none" }}>
-            <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
-              New inbound
-            </Btn>
-          </Link>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Link href="/inbound/import" style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Upload}>
+                Import from doc
+              </Btn>
+            </Link>
+            <Link href="/inbound/new" style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
+                New inbound
+              </Btn>
+            </Link>
+          </div>
         }
       />
 
