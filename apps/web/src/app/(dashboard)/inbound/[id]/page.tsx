@@ -456,6 +456,15 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                             setReceiveQty(remaining || 1);
                             setReceiveLot("");
                             setReceiveExpiry("");
+                            // Default to the first rack in this warehouse
+                            // so the pallet ends up status='stored' and
+                            // allocatable. User can pick a different rack
+                            // or clear to leave it on the dock.
+                            const firstRack = (locations.data ?? [])
+                              .filter((loc) => loc.type === "rack")
+                              .slice()
+                              .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))[0];
+                            setReceivePutawayId(firstRack?.id ?? "");
                             setReceiveErr(null);
                           }
                         }}

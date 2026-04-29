@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Card, PageTitle, Tag, TextField } from "~/components/kit";
+import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
+import { Ic } from "~/components/icons";
 
 /**
  * Stock-on-hand view. Two tabs:
@@ -26,6 +27,13 @@ export default function StockPage() {
   >("");
 
   const warehouses = trpc.warehouse.list.useQuery();
+  const utils = trpc.useUtils();
+  const movePallet = trpc.pallet.move.useMutation({
+    onSuccess: () => {
+      utils.inventory.byPallet.invalidate();
+      utils.inventory.byProduct.invalidate();
+    },
+  });
   const byProduct = trpc.inventory.byProduct.useQuery(
     { q, warehouseId: warehouseId || undefined },
     { enabled: tab === "product" },
@@ -38,6 +46,15 @@ export default function StockPage() {
     },
     { enabled: tab === "pallet" },
   );
+
+  // Pull rack locations for the active warehouse so each "Put away"
+  // row can offer a destination dropdown. If no warehouse is filtered,
+  // the location list is empty and the action shows a hint instead.
+  const racks = trpc.location.listByWarehouse.useQuery(
+    { warehouseId: warehouseId || "" },
+    { enabled: !!warehouseId },
+  );
+  const [putawayChoice, setPutawayChoice] = useState<Record<string, string>>({});
 
   return (
     <div>
@@ -193,7 +210,7 @@ export default function StockPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px",
+              gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px 200px",
               gap: 12,
               padding: "12px 16px",
               fontSize: 10.5,
@@ -210,13 +227,14 @@ export default function StockPage() {
             <div>Qty</div>
             <div>Lot</div>
             <div>Expiry</div>
+            <div>Action</div>
           </div>
           {(byPallet.data ?? []).map((r) => (
             <div
               key={r.palletItemId}
               style={{
                 display: "grid",
-                gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px",
+                gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px 200px",
                 gap: 12,
                 padding: "10px 16px",
                 borderTop: `1.5px dashed ${t.border}`,
@@ -263,6 +281,75 @@ export default function StockPage() {
                 {r.expiry
                   ? new Date(r.expiry).toLocaleDateString()
                   : "—"}
+              </div>
+              <div>
+                {(r.palletStatus === "received" ||
+                  r.palletStatus === "in_transit") && (
+                  warehouseId ? (
+                    racks.data && racks.data.filter((l) => l.type === "rack").length > 0 ? (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <select
+                          value={putawayChoice[r.palletId] ?? ""}
+                          onChange={(e) =>
+                            setPutawayChoice((prev) => ({
+                              ...prev,
+                              [r.palletId]: e.target.value,
+                            }))
+                          }
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            padding: "4px 6px",
+                            borderRadius: 6,
+                            background: t.surfaceAlt,
+                            border: `1.5px solid ${t.border}`,
+                            fontFamily: FONTS.mono,
+                            fontSize: 11,
+                            color: t.ink,
+                          }}
+                        >
+                          <option value="">— rack —</option>
+                          {racks.data
+                            .filter((l) => l.type === "rack")
+                            .slice()
+                            .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))
+                            .map((loc) => (
+                              <option key={loc.id} value={loc.id}>
+                                {loc.code}
+                              </option>
+                            ))}
+                        </select>
+                        <Btn
+                          t={t}
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          icon={Ic.Check}
+                          disabled={
+                            !putawayChoice[r.palletId] || movePallet.isPending
+                          }
+                          onClick={() =>
+                            movePallet.mutate({
+                              palletId: r.palletId,
+                              toLocationId: putawayChoice[r.palletId]!,
+                              reason: "putaway",
+                            })
+                          }
+                        >
+                          Put away
+                        </Btn>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: t.muted }}>
+                        no racks
+                      </span>
+                    )
+                  ) : (
+                    <span style={{ fontSize: 11, color: t.muted }}>
+                      filter to a warehouse
+                    </span>
+                  )
+                )}
               </div>
             </div>
           ))}
