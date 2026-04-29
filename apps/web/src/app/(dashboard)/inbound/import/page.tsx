@@ -78,7 +78,28 @@ export default function InboundImportPage() {
     setText("");
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      const mime = (file.type || "").toLowerCase();
+      // MIME wins because some uploads have odd / missing extensions
+      // (e.g. iOS HEIC, clipboard paste, downloads with stripped names).
+      const isImage =
+        mime.startsWith("image/") ||
+        /\.(png|jpe?g|webp|heic|heif|gif|bmp)$/i.test(lower);
+      const isPdf = mime === "application/pdf" || lower.endsWith(".pdf");
+      const isExcel =
+        mime.includes("spreadsheet") ||
+        mime === "application/vnd.ms-excel" ||
+        lower.endsWith(".xlsx") ||
+        lower.endsWith(".xls");
+      const isCsv =
+        mime === "text/csv" || lower.endsWith(".csv") || lower.endsWith(".txt");
+      if (isImage) {
+        // Always canvas-roundtrip to JPEG. The server's zod schema only
+        // accepts data:image/(png|jpeg);base64, and phone photos can
+        // exceed Vercel's 4.5MB body limit otherwise.
+        const finalUrl = await fileToJpegDataUrl(file);
+        setImageDataUrl(finalUrl);
+        setImagePreview(finalUrl);
+      } else if (isExcel) {
         const xlsx = await import("xlsx");
         const buf = await file.arrayBuffer();
         const wb = xlsx.read(buf, { type: "array" });
@@ -88,7 +109,7 @@ export default function InboundImportPage() {
           parts.push(xlsx.utils.sheet_to_csv(wb.Sheets[sheetName]!));
         }
         setText(parts.join("\n"));
-      } else if (lower.endsWith(".pdf")) {
+      } else if (isPdf) {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
         const buf = await file.arrayBuffer();
@@ -113,28 +134,18 @@ export default function InboundImportPage() {
           const ctx = canvas.getContext("2d");
           if (!ctx) throw new Error("Canvas 2D unavailable");
           await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-          const data = canvas.toDataURL("image/jpeg", 0.9);
+          const data = canvas.toDataURL("image/jpeg", 0.85);
           setImageDataUrl(data);
           setImagePreview(data);
         }
-      } else if (
-        lower.endsWith(".png") ||
-        lower.endsWith(".jpg") ||
-        lower.endsWith(".jpeg") ||
-        lower.endsWith(".webp")
-      ) {
-        const data = await fileToDataUrl(file);
-        // Vision API only accepts png + jpeg; webp gets re-encoded.
-        if (lower.endsWith(".webp")) {
-          const reencoded = await reencodeAsJpeg(data);
-          setImageDataUrl(reencoded);
-          setImagePreview(reencoded);
-        } else {
-          setImageDataUrl(data);
-          setImagePreview(data);
-        }
-      } else {
+      } else if (isCsv) {
         setText(await file.text());
+      } else {
+        throw new Error(
+          `Unsupported file type${
+            mime ? ` (${mime})` : ""
+          }. Use .xlsx, .csv, .pdf, or an image (.png / .jpg / .heic).`,
+        );
       }
     } catch (e) {
       setFileErr(e instanceof Error ? e.message : "Couldn't read that file.");
@@ -579,28 +590,38 @@ function inlineInputStyle(t: typeof theme): React.CSSProperties {
   };
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve(reader.result as string);
-    reader.readAsDataURL(file);
-  });
-}
-
-async function reencodeAsJpeg(dataUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("Canvas 2D unavailable"));
-      ctx.drawImage(img, 0, 0);
-      resolve(canvas.toDataURL("image/jpeg", 0.9));
-    };
-    img.onerror = () => reject(new Error("Couldn't decode image"));
-    img.src = dataUrl;
-  });
+async function fileToJpegDataUrl(file: File): Promise<string> {
+  // Object URL lets the browser sniff format from bytes (works even when
+  // file.type is empty or wrong, e.g. iOS HEIC, clipboard paste).
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const maxDim = 1800;
+        const scale = Math.min(
+          1,
+          maxDim / Math.max(img.naturalWidth, img.naturalHeight),
+        );
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Canvas 2D unavailable"));
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () =>
+        reject(
+          new Error(
+            "Couldn't decode that image. Try saving it as PNG or JPEG first.",
+          ),
+        );
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
