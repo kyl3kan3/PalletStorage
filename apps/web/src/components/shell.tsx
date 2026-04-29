@@ -14,6 +14,7 @@ import { theme, FONTS, Wordmark, Cubby } from "~/lib/theme";
 import { Ic } from "./icons";
 import { Search } from "./kit";
 import { useMatchMedia } from "~/lib/useMatchMedia";
+import { CubbyChat } from "./cubby-chat";
 
 interface NavItem {
   href: Route;
@@ -223,6 +224,8 @@ export function Shell({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+
+      <CubbyChat />
     </div>
   );
 }
