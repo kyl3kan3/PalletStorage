@@ -5,7 +5,7 @@ import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
-import { Btn, Card, PageTitle, TextField } from "~/components/kit";
+import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { BackLink } from "~/components/back-link";
 
@@ -47,6 +47,7 @@ export default function InboundImportPage() {
   const [supplierName, setSupplierName] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [expectedAt, setExpectedAt] = useState("");
+  const [expectedTime, setExpectedTime] = useState("");
   const [lines, setLines] = useState<Line[] | null>(null);
 
   useMemo(() => {
@@ -61,6 +62,7 @@ export default function InboundImportPage() {
       if (data.supplierName) setSupplierName(data.supplierName);
       if (data.customerName) setCustomerName(data.customerName);
       if (data.expectedAt) setExpectedAt(data.expectedAt);
+      if (data.expectedTime) setExpectedTime(data.expectedTime);
       setLines(data.lines.map((l) => ({ ...l })));
     },
   });
@@ -319,14 +321,36 @@ export default function InboundImportPage() {
               />
             </Field>
             <Field label="Expected on">
-              <TextField
-                t={t}
-                type="date"
-                value={expectedAt}
-                onChange={(e) => setExpectedAt(e.target.value)}
-              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <TextField
+                  t={t}
+                  type="date"
+                  value={expectedAt}
+                  onChange={(e) => setExpectedAt(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <TextField
+                  t={t}
+                  type="time"
+                  value={expectedTime}
+                  onChange={(e) => setExpectedTime(e.target.value)}
+                  style={{ width: 110 }}
+                />
+              </div>
             </Field>
-            <Field label="Supplier (sender)">
+            <Field
+              label="Supplier (sender)"
+              hint={
+                supplierName
+                  ? parse.data?.existingSupplier
+                    ? {
+                        tone: "mint",
+                        text: `Matched to existing "${parse.data.existingSupplier.name}"`,
+                      }
+                    : { tone: "neutral", text: `Will create new supplier "${supplierName}"` }
+                  : undefined
+              }
+            >
               <TextField
                 t={t}
                 value={supplierName}
@@ -334,7 +358,19 @@ export default function InboundImportPage() {
                 placeholder="Optional"
               />
             </Field>
-            <Field label="Customer (3PL client)">
+            <Field
+              label="Customer (3PL client)"
+              hint={
+                customerName
+                  ? parse.data?.existingCustomer
+                    ? {
+                        tone: "mint",
+                        text: `Matched to existing "${parse.data.existingCustomer.name}"`,
+                      }
+                    : { tone: "neutral", text: `Will create new customer "${customerName}"` }
+                  : undefined
+              }
+            >
               <TextField
                 t={t}
                 value={customerName}
@@ -505,7 +541,11 @@ export default function InboundImportPage() {
                   reference: reference.trim(),
                   supplierName: supplierName.trim() || undefined,
                   customerName: customerName.trim() || undefined,
-                  expectedAt: expectedAt || undefined,
+                  expectedAt: expectedAt
+                    ? expectedTime
+                      ? `${expectedAt}T${expectedTime}:00`
+                      : expectedAt
+                    : undefined,
                   lines: activeLines.map((l) => ({
                     productName: l.productName.trim(),
                     sku: l.sku?.trim() || undefined,
@@ -551,10 +591,12 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function Field({
   label,
   required,
+  hint,
   children,
 }: {
   label: string;
   required?: boolean;
+  hint?: { tone: "mint" | "neutral"; text: string };
   children: React.ReactNode;
 }) {
   return (
@@ -572,6 +614,13 @@ function Field({
         {required && <span style={{ color: theme.coral }}> *</span>}
       </span>
       {children}
+      {hint && (
+        <span style={{ marginTop: 2 }}>
+          <Tag t={theme} tone={hint.tone}>
+            {hint.text}
+          </Tag>
+        </span>
+      )}
     </label>
   );
 }

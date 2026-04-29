@@ -36,12 +36,14 @@ type DetectedCustomer = {
   contactName?: string;
   email?: string;
   phone?: string;
+  taxId?: string;
   billingLine1?: string;
   billingLine2?: string;
   billingCity?: string;
   billingRegion?: string;
   billingPostalCode?: string;
   billingCountry?: string;
+  notes?: string;
 };
 
 type DetectedRates = {
@@ -503,6 +505,18 @@ export default function ImportInventoryPage() {
                       }
                     />
                   </Field>
+                  <Field label="Tax ID">
+                    <TextField
+                      t={t}
+                      value={customer.taxId ?? ""}
+                      onChange={(e) =>
+                        setCustomer({
+                          ...customer,
+                          taxId: e.target.value || undefined,
+                        })
+                      }
+                    />
+                  </Field>
                   <Field label="Address line 1">
                     <TextField
                       t={t}
@@ -532,6 +546,33 @@ export default function ImportInventoryPage() {
                           billingCity: city || undefined,
                           billingRegion: region || undefined,
                         });
+                      }}
+                    />
+                  </Field>
+                </div>
+              )}
+              {!matchExistingId && customer.notes && (
+                <div style={{ marginTop: 10 }}>
+                  <Field label="Notes (detected)">
+                    <textarea
+                      value={customer.notes}
+                      onChange={(e) =>
+                        setCustomer({
+                          ...customer,
+                          notes: e.target.value || undefined,
+                        })
+                      }
+                      rows={2}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: t.surface,
+                        border: `1.5px solid ${t.border}`,
+                        fontSize: 12.5,
+                        color: t.ink,
+                        fontFamily: FONTS.sans,
+                        resize: "vertical",
                       }}
                     />
                   </Field>
@@ -802,6 +843,7 @@ export default function ImportInventoryPage() {
                           contactName: customer.contactName?.trim() || undefined,
                           email: customer.email?.trim() || undefined,
                           phone: customer.phone?.trim() || undefined,
+                          taxId: customer.taxId?.trim() || undefined,
                           billingLine1:
                             customer.billingLine1?.trim() || undefined,
                           billingLine2:
@@ -813,6 +855,7 @@ export default function ImportInventoryPage() {
                             customer.billingPostalCode?.trim() || undefined,
                           billingCountry:
                             customer.billingCountry?.trim() || undefined,
+                          notes: customer.notes?.trim() || undefined,
                         }
                       : undefined,
                   warehouseId,

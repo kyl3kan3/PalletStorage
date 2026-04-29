@@ -258,18 +258,54 @@ export const customerRouter = router({
         knownCustomerName = existing.name;
       }
 
+      // Pre-fetch known org data so the AI can prefer existing names
+      // over inventing arbitrary spellings — same case-insensitive
+      // match `applyInventoryImport` does at write-time, but surfaced
+      // up front so duplicates don't slip through. Cap the lists so the
+      // prompt stays within token budget on very large orgs.
+      const knownCustomers = await ctx.db
+        .select({ id: schema.customers.id, name: schema.customers.name })
+        .from(schema.customers)
+        .where(eq(schema.customers.organizationId, orgId))
+        .orderBy(asc(schema.customers.name))
+        .limit(500);
+      const knownProducts = await ctx.db
+        .select({ sku: schema.products.sku, name: schema.products.name })
+        .from(schema.products)
+        .where(eq(schema.products.organizationId, orgId))
+        .orderBy(asc(schema.products.name))
+        .limit(500);
+
+      const knownCustomersBlock = knownCustomers.length
+        ? `KNOWN CUSTOMERS in this org (3PL clients we already store pallets for):\n${knownCustomers
+            .map((c) => `  - ${c.name}`)
+            .join(
+              "\n",
+            )}\nIf the sheet's customer matches one of these (even loosely — e.g. "Ronnies" vs "Ronnie's Ice Cream"), return the EXACT spelling above.`
+        : "";
+      const knownProductsBlock = knownProducts.length
+        ? `KNOWN PRODUCTS in this org:\n${knownProducts
+            .map((p) => `  - ${p.name}${p.sku ? ` [SKU: ${p.sku}]` : ""}`)
+            .slice(0, 500)
+            .join(
+              "\n",
+            )}\nWhen a row's product matches one of these (by name OR SKU, fuzzy ok), reuse the EXACT name + SKU. Novel products are fine — they'll be auto-created on apply.`
+        : "";
+
       const prompt = [
         knownCustomerName
           ? `You are extracting inventory data from a 3PL warehouse spreadsheet for the customer "${knownCustomerName}".`
           : "You are extracting inventory data from a 3PL warehouse spreadsheet. The customer (the 3PL client whose stock this is) is identified by the sheet itself — extract their info too.",
-        "The text below is a pasted Excel/CSV snippet. Each meaningful pallet row represents ONE pallet of stock.",
+        "The text below is a pasted Excel/CSV snippet, OR an image of the same. Each meaningful pallet row represents ONE pallet of stock.",
+        knownCustomersBlock,
+        knownProductsBlock,
         knownCustomerName
           ? ""
-          : "DETECT THE CUSTOMER (the company whose pallets are being stored) from headers / titles. Common patterns: a company name + email at the top, sometimes a 'bill to' or 'for' label. The 'pay to' / 'remit to' address is usually the WAREHOUSE — NOT the customer — so skip that. Return their info under detectedCustomer with whatever fields are visible: name, contactName, email, phone, billingLine1, billingLine2, billingCity, billingRegion, billingPostalCode, billingCountry. If the sheet doesn't show an address for the customer, omit those fields.",
+          : "DETECT THE CUSTOMER (the company whose pallets are being stored) from headers / titles. Common patterns: a company name + email at the top, sometimes a 'bill to' or 'for' label. The 'pay to' / 'remit to' address is usually the WAREHOUSE — NOT the customer — so skip that. Return their info under detectedCustomer with whatever fields are visible: name, contactName, email, phone, taxId (EIN / VAT / business tax #), billingLine1, billingLine2, billingCity, billingRegion, billingPostalCode, billingCountry, notes (any special-handling text — allergens, hazmat flags, billing memo). If the sheet doesn't show an address for the customer, omit those fields.",
         "Pull these fields per row when present:",
-        '  - productName: the product label (strip leading "#1 - " or "#2 - " pallet numbering — keep just the product part, e.g. "Rocky Mountains" or "Vanilla pwbs")',
+        '  - productName: the product label (strip leading "#1 - " or "#2 - " pallet numbering — keep just the product part, e.g. "Rocky Mountains" or "Vanilla pwbs"). Match against KNOWN PRODUCTS above when possible.',
         "  - qty: integer number of items on the pallet (default 1 if not given)",
-        "  - inDate: when the pallet was received (ISO YYYY-MM-DD)",
+        "  - inDate: when the pallet was received (ISO YYYY-MM-DD). If a TIME is also shown (e.g. '4/30/24 9:15 am'), still return date-only; the time can go in `notes` if it matters.",
         "  - outDate: when the pallet shipped, if a ship/out date is present (ISO YYYY-MM-DD); omit if blank",
         "  - lot: lot/batch number if present, else omit",
         "  - expiry: ISO date if present, else omit",
@@ -280,7 +316,7 @@ export const customerRouter = router({
         "Skip header rows, total rows, blank rows, and metadata that isn't customer info.",
         knownCustomerName
           ? 'Return strict JSON: {"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}'
-          : 'Return strict JSON: {"detectedCustomer":{"name":"...","email":"...","billingLine1":"...","billingCity":"...","billingRegion":"...","billingPostalCode":"...","billingCountry":"..."},"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}',
+          : 'Return strict JSON: {"detectedCustomer":{"name":"...","email":"...","taxId":"...","billingLine1":"...","billingCity":"...","billingRegion":"...","billingPostalCode":"...","billingCountry":"...","notes":"..."},"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}',
         "Omit fields whose value is unknown rather than guessing.",
       ]
         .filter(Boolean)
@@ -404,12 +440,14 @@ export const customerRouter = router({
           contactName: cleanStr(o.contactName),
           email: cleanStr(o.email, 320),
           phone: cleanStr(o.phone, 64),
+          taxId: cleanStr(o.taxId, 64),
           billingLine1: cleanStr(o.billingLine1),
           billingLine2: cleanStr(o.billingLine2),
           billingCity: cleanStr(o.billingCity, 100),
           billingRegion: cleanStr(o.billingRegion, 100),
           billingPostalCode: cleanStr(o.billingPostalCode, 32),
           billingCountry: cleanStr(o.billingCountry, 100),
+          notes: cleanStr(o.notes, 2000),
         };
       })();
 
@@ -455,12 +493,14 @@ export const customerRouter = router({
             contactName: z.string().trim().max(200).optional(),
             email: z.string().trim().max(320).optional(),
             phone: z.string().trim().max(64).optional(),
+            taxId: z.string().trim().max(64).optional(),
             billingLine1: z.string().trim().max(200).optional(),
             billingLine2: z.string().trim().max(200).optional(),
             billingCity: z.string().trim().max(100).optional(),
             billingRegion: z.string().trim().max(100).optional(),
             billingPostalCode: z.string().trim().max(32).optional(),
             billingCountry: z.string().trim().max(100).optional(),
+            notes: z.string().trim().max(2000).optional(),
           })
           .optional(),
         warehouseId: z.string().uuid(),
@@ -542,12 +582,14 @@ export const customerRouter = router({
               contactName: info.contactName ?? null,
               email: info.email ?? null,
               phone: info.phone ?? null,
+              taxId: info.taxId ?? null,
               billingLine1: info.billingLine1 ?? null,
               billingLine2: info.billingLine2 ?? null,
               billingCity: info.billingCity ?? null,
               billingRegion: info.billingRegion ?? null,
               billingPostalCode: info.billingPostalCode ?? null,
               billingCountry: info.billingCountry ?? null,
+              notes: info.notes ?? null,
             })
             .returning({ id: schema.customers.id });
           if (!created)

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
@@ -493,7 +493,7 @@ export const inboundRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await requireOrgId(ctx);
+      const orgId = await requireOrgId(ctx);
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
         throw new TRPCError({
@@ -508,22 +508,70 @@ export const inboundRouter = router({
         });
       }
 
+      // Pre-fetch the org's existing customers, suppliers, and products
+      // so the AI can match by exact spelling rather than inventing
+      // near-duplicates that downstream `ilike` lookups don't catch
+      // reliably. Capped to keep prompts within token budget.
+      const [knownCustomers, knownSuppliers, knownProducts] = await Promise.all(
+        [
+          ctx.db
+            .select({ id: schema.customers.id, name: schema.customers.name })
+            .from(schema.customers)
+            .where(eq(schema.customers.organizationId, orgId))
+            .orderBy(asc(schema.customers.name))
+            .limit(500),
+          ctx.db
+            .select({ id: schema.suppliers.id, name: schema.suppliers.name })
+            .from(schema.suppliers)
+            .where(eq(schema.suppliers.organizationId, orgId))
+            .orderBy(asc(schema.suppliers.name))
+            .limit(500),
+          ctx.db
+            .select({ sku: schema.products.sku, name: schema.products.name })
+            .from(schema.products)
+            .where(eq(schema.products.organizationId, orgId))
+            .orderBy(asc(schema.products.name))
+            .limit(500),
+        ],
+      );
+
+      const knownCustomersBlock = knownCustomers.length
+        ? `KNOWN CUSTOMERS in this org (3PL clients we already have):\n${knownCustomers
+            .map((c) => `  - ${c.name}`)
+            .join("\n")}\nIf the document's consignee / bill-to / customer name matches one of these (even loosely — "Ronnies" vs "Ronnie's Ice Cream"), return the EXACT spelling above.`
+        : "";
+      const knownSuppliersBlock = knownSuppliers.length
+        ? `KNOWN SUPPLIERS in this org (vendors / shippers we've received from):\n${knownSuppliers
+            .map((s) => `  - ${s.name}`)
+            .join("\n")}\nSame rule: prefer the EXACT spelling above when there's a fuzzy match.`
+        : "";
+      const knownProductsBlock = knownProducts.length
+        ? `KNOWN PRODUCTS in this org:\n${knownProducts
+            .map((p) => `  - ${p.name}${p.sku ? ` [SKU: ${p.sku}]` : ""}`)
+            .join("\n")}\nWhen a manifest line matches a known product (by name OR SKU, fuzzy ok), reuse the EXACT name + SKU. Novel products are fine — they'll be auto-created on confirm.`
+        : "";
+
       const prompt = [
-        "You are extracting an INBOUND warehouse order (a shipment arriving from a supplier or 3PL customer) from the document below.",
+        "You are extracting an INBOUND warehouse order (a shipment arriving from a supplier or 3PL customer) from the document below. The doc may be a packing slip, BOL, supplier invoice, ASN, pickup ticket, or delivery confirmation.",
+        knownCustomersBlock,
+        knownSuppliersBlock,
+        knownProductsBlock,
         "Pull whatever fields are present:",
-        "  - reference: PO number, BOL number, order number, or any other reference printed on the doc",
-        "  - supplierName: who is sending the freight (sender / shipper / from)",
-        "  - customerName: the 3PL client whose stock this is (consignee / bill-to / for) — only set if clearly NOT the receiving warehouse",
-        "  - expectedAt: ISO YYYY-MM-DD if a delivery / expected date is shown",
+        '  - reference: the SHIPMENT IDENTIFIER. Try in this priority order: PO # ("PO 12345", "P.O. #12345", "Purchase Order: 12345"), BOL # ("BOL 12345", "Bill of Lading: 12345"), ASN #, invoice #, order #, pickup #, delivery #, tracking #. Whichever appears most prominently is the answer. Always required if visible — this is how the warehouse looks the order up later.',
+        '  - supplierName: who is SENDING the freight. Look for "From", "Ship From", "Shipper", "Origin", "Vendor", "Sold By". Match against KNOWN SUPPLIERS above first.',
+        '  - customerName: the 3PL client whose stock this is. Look for "To", "Consignee", "Bill To", "For", "Deliver To", "Sold To". Match against KNOWN CUSTOMERS above first. The receiving WAREHOUSE address (where the truck physically delivers) is NOT the customer — skip it.',
+        "  - expectedAt: ISO YYYY-MM-DD if a delivery / expected / appointment date is shown. If a TIME is also given (e.g. \"Delivery: 4/30 8:00 AM\" or \"Appointment 14:00\"), return a full ISO 8601 datetime: 'YYYY-MM-DDTHH:MM:00' instead — keep it date-only when no time is shown.",
         "  - lines: an array of one entry per product/SKU on the manifest, each with:",
-        "      productName: the human label, e.g. 'Rocky Mountains Vanilla 12oz'",
-        "      sku: the SKU / item number / part number, if present",
+        "      productName: the human label, e.g. 'Rocky Mountains Vanilla 12oz'. Match against KNOWN PRODUCTS above when possible.",
+        "      sku: the SKU / item # / part # / UPC, if present. Reuse exact SKU from KNOWN PRODUCTS on a match.",
         "      qty: integer quantity",
-        '      qtyUnit: one of "each", "case", or "pallet" — pick the unit the qty is in. Default "each" if uncertain.',
-        "Skip footer/total rows and decorative text.",
-        'Return strict JSON: {"reference":"...","supplierName":"...","customerName":"...","expectedAt":"YYYY-MM-DD","lines":[{"productName":"...","sku":"...","qty":1,"qtyUnit":"each"},...]}.',
+        '      qtyUnit: one of "each", "case", or "pallet" — pick the unit the qty is in. PALLET is most common on a packing slip / BOL ("12 pallets of widget X"); use "case" for case counts; default "each" only if truly uncertain.',
+        "Skip footer / total / grand-total rows and decorative text. Treat repeated header lines (one per page on a multi-page doc) as one.",
+        'Return strict JSON: {"reference":"...","supplierName":"...","customerName":"...","expectedAt":"YYYY-MM-DD or YYYY-MM-DDTHH:MM:00","lines":[{"productName":"...","sku":"...","qty":1,"qtyUnit":"each"},...]}.',
         "Omit fields whose value is unknown rather than guessing.",
-      ].join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const messageContent: Array<Record<string, unknown>> = [
         { type: "text", text: prompt },
@@ -602,11 +650,65 @@ export const inboundRouter = router({
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);
 
+      const supplierName = cleanStr(parsed.supplierName);
+      const customerName = cleanStr(parsed.customerName);
+
+      // Surface existing-name matches up front so the UI can chip
+      // "Matched to {existing}" before the user clicks Confirm — that
+      // way a near-duplicate ("Ronnies" vs "Ronnie's") gets caught
+      // before `createFromAiImport` would silently create a second row.
+      let existingSupplier: { id: string; name: string } | undefined;
+      if (supplierName) {
+        const [match] = await ctx.db
+          .select({ id: schema.suppliers.id, name: schema.suppliers.name })
+          .from(schema.suppliers)
+          .where(
+            and(
+              eq(schema.suppliers.organizationId, orgId),
+              ilike(schema.suppliers.name, supplierName),
+            ),
+          )
+          .limit(1);
+        if (match) existingSupplier = match;
+      }
+      let existingCustomer: { id: string; name: string } | undefined;
+      if (customerName) {
+        const [match] = await ctx.db
+          .select({ id: schema.customers.id, name: schema.customers.name })
+          .from(schema.customers)
+          .where(
+            and(
+              eq(schema.customers.organizationId, orgId),
+              ilike(schema.customers.name, customerName),
+            ),
+          )
+          .limit(1);
+        if (match) existingCustomer = match;
+      }
+
+      // expectedAt may come back as YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS.
+      // The createFromAiImport input today only accepts date-only, so
+      // split: keep `expectedAt` as the date for compatibility, expose
+      // `expectedTime` as HH:MM if the AI extracted one. The UI can show
+      // both; the create mutation can be widened in a follow-up.
+      const rawExpected = cleanStr(parsed.expectedAt, 32);
+      let expectedAt: string | undefined;
+      let expectedTime: string | undefined;
+      if (rawExpected) {
+        const dateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(rawExpected);
+        if (dateMatch) expectedAt = dateMatch[1];
+        const timeMatch = /T(\d{2}:\d{2})/.exec(rawExpected);
+        if (timeMatch) expectedTime = timeMatch[1];
+      }
+
       return {
         reference: cleanStr(parsed.reference, 120),
-        supplierName: cleanStr(parsed.supplierName),
-        customerName: cleanStr(parsed.customerName),
-        expectedAt: cleanStr(parsed.expectedAt, 32),
+        supplierName,
+        customerName,
+        expectedAt,
+        expectedTime,
+        existingSupplier,
+        existingCustomer,
         lines,
       };
     }),
@@ -626,7 +728,13 @@ export const inboundRouter = router({
         reference: z.string().trim().min(1).max(120),
         supplierName: z.string().trim().max(200).optional(),
         customerName: z.string().trim().max(200).optional(),
-        expectedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        // Accept either YYYY-MM-DD (date-only) or full ISO datetime
+        // (YYYY-MM-DDTHH:MM[:SS]) — the AI returns datetime when an
+        // appointment time is shown on the doc.
+        expectedAt: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/)
+          .optional(),
         lines: z
           .array(
             z.object({
