@@ -224,6 +224,12 @@ export const customers = pgTable(
     shippingPostalCode: text("shipping_postal_code"),
     shippingCountry: text("shipping_country"),
     notes: text("notes"),
+    // Per-customer billing rates (integer cents) for the monthly
+    // storage statement. Nullable — customers without rates set are
+    // flagged in the report and skipped from QB push.
+    storageRateCentsPerPalletMonth: integer("storage_rate_cents_per_pallet_month"),
+    receiveRateCentsPerPallet: integer("receive_rate_cents_per_pallet"),
+    shipRateCentsPerPallet: integer("ship_rate_cents_per_pallet"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

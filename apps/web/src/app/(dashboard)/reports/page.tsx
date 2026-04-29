@@ -72,6 +72,13 @@ export default function ReportsPage() {
           title="Expiring stock"
           desc="Pallet items expiring in the next N days, soonest first."
         />
+        <Tile
+          href={"/reports/billing" as Route}
+          icon={Ic.Dollar}
+          tint="mint"
+          title="Customer billing"
+          desc="Per-customer monthly statement: peak storage, in/out fees, total. Download bill or push to QuickBooks."
+        />
       </div>
     </div>
   );

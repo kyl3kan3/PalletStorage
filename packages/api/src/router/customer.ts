@@ -31,6 +31,13 @@ const profile = z.object({
   shippingPostalCode: z.string().trim().max(32).nullable().optional(),
   shippingCountry: z.string().trim().max(100).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  // Per-customer billing rates in integer cents. Used by the monthly
+  // storage statement on /reports/billing. All optional + nullable so
+  // an existing customer without rates is fine — they just can't be
+  // QB-exported until rates are set.
+  storageRateCentsPerPalletMonth: z.number().int().min(0).nullable().optional(),
+  receiveRateCentsPerPallet: z.number().int().min(0).nullable().optional(),
+  shipRateCentsPerPallet: z.number().int().min(0).nullable().optional(),
   active: z.boolean().optional(),
 });
 

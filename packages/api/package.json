@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./root": "./src/root.ts",
     "./trpc": "./src/trpc.ts",
-    "./quickbooks/client": "./src/quickbooks/client.ts"
+    "./quickbooks/client": "./src/quickbooks/client.ts",
+    "./billing/calculate": "./src/billing/calculate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -13,9 +13,12 @@ import {
   sql,
   sum,
 } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
-import { router, tenantProcedure } from "../trpc";
+import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+import { computeBillingPeriod } from "../billing/calculate";
+import { loadQbConnection, postBillingInvoice, periodLabel } from "../quickbooks/billing";
 
 // Shared zod input for date-range reports. Both sides optional so a
 // caller can omit one and get "everything before X" / "everything after X".
@@ -442,5 +445,87 @@ export const reportRouter = router({
         )
         .orderBy(desc(schema.movements.createdAt))
         .limit(input.limit);
+    }),
+
+  /**
+   * Per-customer monthly billing snapshot. One row per customer with
+   * peak/current/opening pallet counts, in/out movement counts, and
+   * computed charges from the customer's per-pallet rates. Defaults
+   * to current month-to-date when called without dates.
+   */
+  customerBilling: tenantProcedure
+    .input(
+      z.object({
+        from: z.date(),
+        to: z.date(),
+        customerId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const rows = await computeBillingPeriod(
+        ctx.db,
+        orgId,
+        input.customerId ?? null,
+        input.from,
+        input.to,
+      );
+      return { from: input.from, to: input.to, rows };
+    }),
+
+  /**
+   * Push a single customer's monthly bill into QuickBooks as an
+   * Invoice. Refuses if the customer doesn't have all three rates
+   * set, or if the period has zero billable charges. Records a row
+   * in quickbooks_exports for audit.
+   */
+  exportCustomerBillToQuickbooks: managerProcedure
+    .input(
+      z.object({
+        customerId: z.string().uuid(),
+        from: z.date(),
+        to: z.date(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const rows = await computeBillingPeriod(
+        ctx.db,
+        orgId,
+        input.customerId,
+        input.from,
+        input.to,
+      );
+      const row = rows[0];
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+      }
+      if (!row.hasRates) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Set storage / receive / ship rates on ${row.customerName} before exporting.`,
+        });
+      }
+      if (row.totalChargeCents <= 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No billable charges for this period — nothing to export.",
+        });
+      }
+      const conn = await loadQbConnection(ctx.db, orgId);
+      const result = await postBillingInvoice(
+        conn,
+        row.customerName,
+        row,
+        input.from,
+      );
+      await ctx.db.insert(schema.quickbooksExports).values({
+        organizationId: orgId,
+        sourceType: "billing_period",
+        sourceId: `${row.customerId}:${periodLabel(input.from)}`,
+        qboEntityType: "Invoice",
+        qboEntityId: result.qboId,
+      });
+      return { qboId: result.qboId };
     }),
 });

@@ -410,3 +410,15 @@ ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_url" text;
 -- 0012_warehouse_map_upload: allow PDF uploads stored inline.
 ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_data" bytea;
 ALTER TABLE "warehouses" ADD COLUMN IF NOT EXISTS "map_pdf_filename" text;
+
+-- 0013_customer_billing_rates: per-customer rates for monthly billing.
+ALTER TABLE "customers"
+  ADD COLUMN IF NOT EXISTS "storage_rate_cents_per_pallet_month" integer;
+ALTER TABLE "customers"
+  ADD COLUMN IF NOT EXISTS "receive_rate_cents_per_pallet" integer;
+ALTER TABLE "customers"
+  ADD COLUMN IF NOT EXISTS "ship_rate_cents_per_pallet" integer;
+
+-- 0014_movements_reason_index: speed up the per-customer billing walk.
+CREATE INDEX IF NOT EXISTS "movements_org_reason_created_idx"
+  ON "movements" ("organization_id", "reason", "created_at");
