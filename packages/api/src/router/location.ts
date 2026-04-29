@@ -107,19 +107,32 @@ export const locationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      const [row] = await ctx.db
-        .insert(schema.locations)
-        .values({
-          organizationId: orgId,
-          warehouseId: input.warehouseId,
-          parentId: input.parentId ?? null,
-          code: input.code,
-          path: input.path,
-          type: input.type,
-          maxWeightKg: input.maxWeightKg?.toString(),
-          velocityClass: input.velocityClass,
-        })
-        .returning();
+      let row: typeof schema.locations.$inferSelect | undefined;
+      try {
+        const [r] = await ctx.db
+          .insert(schema.locations)
+          .values({
+            organizationId: orgId,
+            warehouseId: input.warehouseId,
+            parentId: input.parentId ?? null,
+            code: input.code,
+            path: input.path,
+            type: input.type,
+            maxWeightKg: input.maxWeightKg?.toString(),
+            velocityClass: input.velocityClass,
+          })
+          .returning();
+        row = r;
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === "23505") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `A location with code "${input.code}" already exists in this warehouse. Pick a different code or check the list above.`,
+          });
+        }
+        throw e;
+      }
 
       // Issue a scannable label code for this location.
       await ctx.db.insert(schema.labelCodes).values({
