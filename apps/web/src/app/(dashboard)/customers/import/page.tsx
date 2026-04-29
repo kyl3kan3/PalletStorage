@@ -124,12 +124,13 @@ export default function ImportInventoryPage() {
       const isCsv =
         mime === "text/csv" || lower.endsWith(".csv") || lower.endsWith(".txt");
       if (isImage) {
-        const data = await fileToDataUrl(file);
-        // OpenAI vision only accepts PNG / JPEG. Re-encode anything
-        // else (webp, heic, gif…) to JPEG via canvas so the upload
-        // doesn't fail server-side.
-        const needsReencode = !mime.includes("png") && !mime.includes("jpeg") && !mime.includes("jpg");
-        const finalUrl = needsReencode ? await reencodeAsJpeg(data) : data;
+        // Always canvas-roundtrip to JPEG. The server's zod schema only
+        // accepts data:image/(png|jpeg);base64, so PNGs from screenshots
+        // are fine, but anything else (webp, heic, gif, or files with an
+        // empty / weird MIME from clipboard pastes) would be rejected.
+        // The canvas pipeline also caps file size — phone photos are
+        // commonly 5-10MB and would blow the Vercel 4.5MB body limit.
+        const finalUrl = await fileToJpegDataUrl(file);
         setImageDataUrl(finalUrl);
         setImagePreview(finalUrl);
       } else if (isExcel) {
@@ -192,29 +193,44 @@ export default function ImportInventoryPage() {
     }
   }
 
-  function fileToDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
-  }
-  async function reencodeAsJpeg(dataUrl: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return reject(new Error("Canvas 2D unavailable"));
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL("image/jpeg", 0.9));
-      };
-      img.onerror = () => reject(new Error("Couldn't decode image"));
-      img.src = dataUrl;
-    });
+  async function fileToJpegDataUrl(file: File): Promise<string> {
+    // Use an object URL rather than readAsDataURL so the browser
+    // image decoder sniffs format from the bytes (works even when
+    // file.type is empty or wrong, e.g. iOS HEIC, clipboard paste).
+    const url = URL.createObjectURL(file);
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => {
+          // Cap at 1800px on the long edge — keeps the request well
+          // under Vercel's 4.5MB body limit while staying readable
+          // for OpenAI vision.
+          const maxDim = 1800;
+          const scale = Math.min(
+            1,
+            maxDim / Math.max(img.naturalWidth, img.naturalHeight),
+          );
+          const w = Math.max(1, Math.round(img.naturalWidth * scale));
+          const h = Math.max(1, Math.round(img.naturalHeight * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return reject(new Error("Canvas 2D unavailable"));
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = () =>
+          reject(
+            new Error(
+              "Couldn't decode that image. Try saving it as PNG or JPEG first.",
+            ),
+          );
+        img.src = url;
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   const activeRows = (rows ?? []).filter((r) => !r.skip);
