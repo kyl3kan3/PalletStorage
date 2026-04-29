@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
@@ -327,6 +327,16 @@ export const inboundRouter = router({
           .limit(1);
         if (!line) throw new Error("Line not found");
 
+        // Look up the inbound order's customer so we can backfill it
+        // onto the pallet. Without this, the per-customer billing
+        // report sees no activity even when the order is bound to a
+        // 3PL client.
+        const [order] = await tx
+          .select({ customerId: schema.inboundOrders.customerId })
+          .from(schema.inboundOrders)
+          .where(eq(schema.inboundOrders.id, line.inboundOrderId))
+          .limit(1);
+
         await tx.insert(schema.palletItems).values({
           organizationId: orgId,
           palletId: input.palletId,
@@ -335,6 +345,24 @@ export const inboundRouter = router({
           lot: input.lot,
           expiry: input.expiry,
         });
+
+        // Defensive backfill: if the pallet was created before
+        // pallet.create accepted customerId (or the inbound's customer
+        // changed mid-flow), copy the order's customerId onto the
+        // pallet now. Only writes when customerId is currently null
+        // so we don't clobber an explicit assignment.
+        if (order?.customerId) {
+          await tx
+            .update(schema.pallets)
+            .set({ customerId: order.customerId })
+            .where(
+              and(
+                eq(schema.pallets.id, input.palletId),
+                eq(schema.pallets.organizationId, orgId),
+                isNull(schema.pallets.customerId),
+              ),
+            );
+        }
 
         await tx
           .update(schema.inboundLines)

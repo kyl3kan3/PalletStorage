@@ -33,6 +33,11 @@ export const palletRouter = router({
       z.object({
         warehouseId: z.string().uuid(),
         weightKg: z.number().positive().optional(),
+        // Owning 3PL customer — copied onto the pallet so the billing
+        // report can attribute receive/ship movements without joining
+        // back through the inbound/outbound order. Optional because
+        // own-stock (non-3PL) pallets exist too.
+        customerId: z.string().uuid().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -46,6 +51,7 @@ export const palletRouter = router({
           lpn,
           status: "in_transit",
           weightKg: input.weightKg?.toString(),
+          customerId: input.customerId ?? null,
         })
         .returning();
 

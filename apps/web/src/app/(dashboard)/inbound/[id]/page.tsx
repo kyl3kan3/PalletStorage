@@ -127,6 +127,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
     try {
       const pallet = await createPallet.mutateAsync({
         warehouseId: order.warehouseId,
+        customerId: order.customerId ?? null,
       });
       if (!pallet) throw new Error("Failed to create pallet");
       await receiveLine.mutateAsync({
