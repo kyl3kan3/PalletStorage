@@ -13,43 +13,105 @@ import bwipjs from "bwip-js/node";
 import { z } from "zod";
 import { db, schema } from "@wms/db";
 import { toCode128 } from "@wms/core";
-import { computeBillingPeriod } from "@wms/api/billing/calculate";
+import {
+  applyRatesToRow,
+  computeBillingPeriod,
+} from "@wms/api/billing/calculate";
 import { and, eq } from "drizzle-orm";
 
 /**
- * GET /api/customers/:id/bill?from=<iso>&to=<iso> — branded monthly
- * storage statement for a single customer. Reuses computeBillingPeriod
- * so the numbers match the on-screen report exactly.
+ * POST /api/customers/:id/bill — branded storage statement for a single
+ * customer. Accepts a JSON body so the caller can pass per-bill rate
+ * overrides, a different storage basis, ad-hoc extra lines, a memo,
+ * and a Net-N due-date offset without those things ever touching the
+ * customer's saved settings. Reuses computeBillingPeriod so the
+ * computed counts match the on-screen report exactly.
+ *
+ * Also accepts GET with ?from=&to= (no overrides) for backward compat
+ * with any saved bookmarks.
  */
 export const runtime = "nodejs";
 
-const queryShape = z.object({
+const STORAGE_BASIS = ["peak", "average", "pallet_days"] as const;
+
+const bodyShape = z.object({
   from: z.string().datetime().or(z.string().date()),
   to: z.string().datetime().or(z.string().date()),
+  storageBasis: z.enum(STORAGE_BASIS).optional(),
+  overrides: z
+    .object({
+      storageRateCentsPerPalletMonth: z.number().int().min(0).optional(),
+      receiveRateCentsPerPallet: z.number().int().min(0).optional(),
+      shipRateCentsPerPallet: z.number().int().min(0).optional(),
+    })
+    .optional(),
+  extraLines: z
+    .array(
+      z.object({
+        description: z.string().trim().min(1).max(200),
+        amountCents: z.number().int(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  memo: z.string().trim().max(1000).optional(),
+  dueInDays: z.number().int().min(0).max(365).optional(),
 });
+
+type BillBody = z.infer<typeof bodyShape>;
+
+export async function POST(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  const parsed = bodyShape.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "invalid body" },
+      { status: 400 },
+    );
+  }
+  return render(req, ctx, parsed.data);
+}
 
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { userId, orgId: clerkOrgId } = await auth();
-  if (!userId || !clerkOrgId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  const { id } = await ctx.params;
   const url = new URL(req.url);
-  const parsed = queryShape.safeParse({
-    from: url.searchParams.get("from") ?? "",
-    to: url.searchParams.get("to") ?? "",
-  });
+  const parsed = bodyShape
+    .pick({ from: true, to: true })
+    .safeParse({
+      from: url.searchParams.get("from") ?? "",
+      to: url.searchParams.get("to") ?? "",
+    });
   if (!parsed.success) {
     return NextResponse.json(
       { error: "from + to query params required (ISO date)" },
       { status: 400 },
     );
   }
-  const from = new Date(parsed.data.from);
-  const to = new Date(parsed.data.to);
+  return render(req, ctx, parsed.data);
+}
+
+async function render(
+  _req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+  body: BillBody,
+) {
+  const { userId, orgId: clerkOrgId } = await auth();
+  if (!userId || !clerkOrgId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const { id } = await ctx.params;
+  const from = new Date(body.from);
+  const to = new Date(body.to);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     return NextResponse.json({ error: "invalid date" }, { status: 400 });
   }
@@ -77,13 +139,21 @@ export async function GET(
     return NextResponse.json({ error: "customer not found" }, { status: 404 });
   }
 
-  const rows = await computeBillingPeriod(db, org.id, id, from, to);
+  const basis = body.storageBasis ?? "peak";
+  const rows = await computeBillingPeriod(db, org.id, id, from, to, {
+    storageBasis: basis,
+  });
   const row = rows[0];
   if (!row) {
     return NextResponse.json({ error: "no billing data" }, { status: 404 });
   }
+  const charges = applyRatesToRow(row, basis, body.overrides);
+  const extras = (body.extraLines ?? []).filter(
+    (l) => l.amountCents !== 0 && l.description.trim(),
+  );
+  const extraTotal = extras.reduce((n, l) => n + l.amountCents, 0);
+  const grandTotalCents = charges.total + extraTotal;
 
-  // Code128 of customer-id + month for filing the printed statement.
   const period = `${from.getUTCFullYear()}-${String(from.getUTCMonth() + 1).padStart(2, "0")}`;
   const barcodeBuf = await bwipjs.toBuffer({
     bcid: "code128",
@@ -93,6 +163,24 @@ export async function GET(
     includetext: false,
   });
   const barcodeDataUri = `data:image/png;base64,${barcodeBuf.toString("base64")}`;
+
+  const dueDate =
+    body.dueInDays != null && body.dueInDays >= 0
+      ? new Date(Date.now() + body.dueInDays * 86_400_000)
+      : null;
+
+  const basisLabel =
+    basis === "peak"
+      ? "peak in period"
+      : basis === "average"
+        ? "average over period"
+        : "pallet-days";
+  const storageQtyLabel =
+    basis === "peak"
+      ? `${row.peakCount}`
+      : basis === "average"
+        ? row.averageCount.toFixed(2)
+        : row.palletDays.toFixed(2);
 
   const doc = (
     <Document>
@@ -116,6 +204,11 @@ export async function GET(
             <Text style={styles.dim}>
               {from.toLocaleDateString()} – {to.toLocaleDateString()}
             </Text>
+            {dueDate && (
+              <Text style={styles.dim}>
+                Due {dueDate.toLocaleDateString()}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -138,66 +231,86 @@ export async function GET(
           <Text style={[styles.cell, styles.colAmount]}>Amount</Text>
         </View>
 
-        {row.storageRateCentsPerPalletMonth != null && (
+        {charges.storageRate > 0 && (
           <View style={styles.row}>
             <Text style={[styles.cell, styles.colItem]}>
-              Pallet storage — peak in period
+              Pallet storage — {basisLabel}
             </Text>
-            <Text style={[styles.cell, styles.colQty]}>{row.peakCount}</Text>
+            <Text style={[styles.cell, styles.colQty]}>{storageQtyLabel}</Text>
             <Text style={[styles.cell, styles.colRate]}>
-              {fmt(row.storageRateCentsPerPalletMonth)} /pallet/mo
+              {fmt(charges.storageRate)} /pallet/mo
             </Text>
             <Text style={[styles.cell, styles.colAmount]}>
-              {fmt(row.storageChargeCents)}
+              {fmt(charges.storageCharge)}
             </Text>
           </View>
         )}
-        {row.receiveRateCentsPerPallet != null && (
+        {charges.receiveRate > 0 && (
           <View style={styles.row}>
             <Text style={[styles.cell, styles.colItem]}>
               Inbound handling
             </Text>
             <Text style={[styles.cell, styles.colQty]}>{row.receives}</Text>
             <Text style={[styles.cell, styles.colRate]}>
-              {fmt(row.receiveRateCentsPerPallet)} /pallet
+              {fmt(charges.receiveRate)} /pallet
             </Text>
             <Text style={[styles.cell, styles.colAmount]}>
-              {fmt(row.receiveChargeCents)}
+              {fmt(charges.receiveCharge)}
             </Text>
           </View>
         )}
-        {row.shipRateCentsPerPallet != null && (
+        {charges.shipRate > 0 && (
           <View style={styles.row}>
             <Text style={[styles.cell, styles.colItem]}>
               Outbound handling
             </Text>
             <Text style={[styles.cell, styles.colQty]}>{row.ships}</Text>
             <Text style={[styles.cell, styles.colRate]}>
-              {fmt(row.shipRateCentsPerPallet)} /pallet
+              {fmt(charges.shipRate)} /pallet
             </Text>
             <Text style={[styles.cell, styles.colAmount]}>
-              {fmt(row.shipChargeCents)}
+              {fmt(charges.shipCharge)}
             </Text>
           </View>
         )}
+
+        {extras.map((e, i) => (
+          <View key={i} style={styles.row}>
+            <Text style={[styles.cell, styles.colItem]}>{e.description}</Text>
+            <Text style={[styles.cell, styles.colQty]}>—</Text>
+            <Text style={[styles.cell, styles.colRate]}>—</Text>
+            <Text
+              style={
+                e.amountCents < 0
+                  ? [styles.cell, styles.colAmount, styles.negative]
+                  : [styles.cell, styles.colAmount]
+              }
+            >
+              {fmt(e.amountCents)}
+            </Text>
+          </View>
+        ))}
 
         <View style={styles.totalRow}>
           <Text style={[styles.cell, styles.colItem]}> </Text>
           <Text style={[styles.cell, styles.colQty]}> </Text>
           <Text style={[styles.cell, styles.colRate, styles.totalLabel]}>Total</Text>
           <Text style={[styles.cell, styles.colAmount, styles.totalAmount]}>
-            {fmt(row.totalChargeCents)}
+            {fmt(grandTotalCents)}
           </Text>
         </View>
 
         <View style={styles.footnote}>
           <Text style={styles.dim}>
-            Opening pallets: {row.openingCount} · Current: {row.currentCount} · Peak: {row.peakCount}
+            Opening pallets: {row.openingCount} · Current: {row.currentCount} · Peak: {row.peakCount} · Avg: {row.averageCount.toFixed(2)} · Pallet-days: {row.palletDays.toFixed(2)}
           </Text>
-          {!row.hasRates && (
+          {!row.hasRates && !body.overrides && (
             <Text style={[styles.dim, { color: "#a0392f" }]}>
               Note: this customer has incomplete rates — some line items may show $0.
             </Text>
+          )}
+          {body.memo && (
+            <Text style={styles.memo}>{body.memo}</Text>
           )}
         </View>
 
@@ -231,7 +344,9 @@ export async function GET(
 }
 
 function fmt(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  return `${sign}$${(abs / 100).toFixed(2)}`;
 }
 
 const styles = StyleSheet.create({
@@ -264,6 +379,7 @@ const styles = StyleSheet.create({
   colQty: { flex: 1, textAlign: "right" },
   colRate: { flex: 1.5, textAlign: "right" },
   colAmount: { flex: 1.2, textAlign: "right" },
+  negative: { color: "#a0392f" },
   totalRow: {
     flexDirection: "row",
     paddingVertical: 12,
@@ -274,6 +390,7 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 12, fontWeight: 700 },
   totalAmount: { fontSize: 13, fontWeight: 700 },
   footnote: { marginTop: 14, gap: 2 },
+  memo: { marginTop: 8, fontSize: 10.5, fontStyle: "italic", color: "#1F1A17" },
   barcodeRow: {
     marginTop: 28,
     flexDirection: "column",

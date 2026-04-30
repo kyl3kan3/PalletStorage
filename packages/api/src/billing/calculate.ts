@@ -4,27 +4,26 @@ import { schema, type Db } from "@wms/db";
 /**
  * Per-customer billing snapshot for a [from, to] window.
  *
- * Numbers are derived by event-sourcing the receive/ship movements
- * for each customer's pallets — no separate ledger needed. We walk
- * every receive/ship in chronological order, treating receive as +1
- * and ship as -1, and pull three values out of the run:
+ * We event-source the receive/ship movements per customer (no separate
+ * ledger): every receive is +1, every ship is -1. From the same walk we
+ * pull three storage-basis figures so the bill-time UI can let the user
+ * pick which one to charge against:
  *
- *   openingCount = running total just before the first row whose
- *                  created_at is in the window. Starting balance.
- *   peakCount    = max of openingCount and every running total seen
- *                  inside the window. Drives the storage charge —
- *                  this is the "if you brought 26 in then shipped 13,
- *                  you still pay for 26" semantic.
- *   currentCount = final running total at `to`. What's still in the
- *                  building right now (or at the end of the window).
+ *   peakCount    — max running count seen inside the window. The "if
+ *                  you brought 26 in then shipped 13, you still pay for
+ *                  26" semantic. The default basis.
+ *   averageCount — time-weighted average pallet count over the window.
+ *                  Smooths out short spikes.
+ *   palletDays   — sum of (count × days), i.e. the total "pallet-day"
+ *                  exposure. Charged at (rate / 30) × palletDays so the
+ *                  per-month rate field stays the same.
  *
- * receives + ships are simple counts of rows in the window, used for
- * the in/out fees.
- *
- * Charges are integer-cent multiplies — no float arithmetic. Customers
- * without rates set have all *Charge fields = 0 and hasRates=false so
- * the UI can flag them and refuse QB export.
+ * receives + ships are simple counts of in-window rows for the in/out
+ * fees. Charges are integer-cent multiplies; no floats. Customers
+ * without rates get all *Charge fields = 0 and hasRates=false.
  */
+
+export type StorageBasis = "peak" | "average" | "pallet_days";
 
 export type BillingRow = {
   customerId: string;
@@ -32,11 +31,17 @@ export type BillingRow = {
   openingCount: number;
   currentCount: number;
   peakCount: number;
+  averageCount: number;
+  palletDays: number;
   receives: number;
   ships: number;
   storageRateCentsPerPalletMonth: number | null;
   receiveRateCentsPerPallet: number | null;
   shipRateCentsPerPallet: number | null;
+  /** Storage basis chosen for the precomputed charge fields below. */
+  storageBasis: StorageBasis;
+  /** All three storage-basis charges in cents — UI/consumer can flip without recomputing. */
+  storageChargeByBasisCents: Record<StorageBasis, number>;
   storageChargeCents: number;
   receiveChargeCents: number;
   shipChargeCents: number;
@@ -44,16 +49,18 @@ export type BillingRow = {
   hasRates: boolean;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export async function computeBillingPeriod(
   db: Db,
   orgId: string,
   customerId: string | null,
   from: Date,
   to: Date,
+  options?: { storageBasis?: StorageBasis },
 ): Promise<BillingRow[]> {
-  // Resolve which customers to compute. Single-customer mode for the
-  // PDF route + QB export; null means every active customer in the
-  // org for the report table.
+  const basis: StorageBasis = options?.storageBasis ?? "peak";
+
   const customers = await db
     .select({
       id: schema.customers.id,
@@ -72,9 +79,6 @@ export async function computeBillingPeriod(
     );
   if (customers.length === 0) return [];
 
-  // One pass: pull every relevant movement up to `to` for every pallet
-  // owned by ANY of these customers. Joining once is cheaper than
-  // looping per-customer when the report renders org-wide.
   const movements = await db
     .select({
       customerId: schema.pallets.customerId,
@@ -92,8 +96,6 @@ export async function computeBillingPeriod(
       ),
     );
 
-  // Bucket per customer, sort each bucket once, walk to derive the
-  // four counters per customer.
   const byCustomer = new Map<string, Array<{ reason: string; t: number }>>();
   for (const m of movements) {
     if (!m.customerId) continue;
@@ -108,6 +110,7 @@ export async function computeBillingPeriod(
 
   const fromMs = from.getTime();
   const toMs = to.getTime();
+  const windowMs = Math.max(0, toMs - fromMs);
 
   const out: BillingRow[] = [];
   for (const c of customers) {
@@ -118,34 +121,69 @@ export async function computeBillingPeriod(
     let peak = 0;
     let receives = 0;
     let ships = 0;
+    // Time-weighted accumulator: sum of (running * milliseconds spent at
+    // that running) across the in-window time. Divide by DAY_MS to get
+    // pallet-days.
+    let palletDayMsAccum = 0;
+    let lastEdgeMs = fromMs;
 
     for (const e of events) {
-      // Lock opening at the boundary: the moment we cross into the
-      // window, the current `running` is the starting balance.
-      if (!openingLocked && e.t >= fromMs) {
+      if (e.t < fromMs) {
+        // Pre-window event — just update running so opening is correct.
+        running += e.reason === "receive" ? 1 : -1;
+        continue;
+      }
+      if (!openingLocked) {
         opening = running;
         peak = running;
         openingLocked = true;
       }
-      running += e.reason === "receive" ? 1 : -1;
-      if (e.t >= fromMs && e.t <= toMs) {
+      // Span at the current running level from lastEdgeMs to this event
+      // (capped at the window end).
+      const cappedMs = Math.min(e.t, toMs);
+      if (cappedMs > lastEdgeMs) {
+        palletDayMsAccum += running * (cappedMs - lastEdgeMs);
+        lastEdgeMs = cappedMs;
+      }
+      if (e.t <= toMs) {
+        running += e.reason === "receive" ? 1 : -1;
         if (e.reason === "receive") receives += 1;
         else ships += 1;
         if (running > peak) peak = running;
       }
     }
-    // No movements in or after the window — the current count IS the
-    // opening balance, and peak equals it (storage carries over).
     if (!openingLocked) {
+      // No events at or after fromMs — running is steady across the
+      // whole window at its current value.
       opening = running;
       peak = running;
+      palletDayMsAccum = Math.max(0, running) * windowMs;
+    } else if (toMs > lastEdgeMs) {
+      palletDayMsAccum += Math.max(0, running) * (toMs - lastEdgeMs);
     }
+
+    const palletDays = palletDayMsAccum / DAY_MS;
+    const windowDays = windowMs / DAY_MS;
+    const averageCount = windowDays > 0 ? palletDays / windowDays : 0;
 
     const storageRate = c.storageRateCentsPerPalletMonth;
     const receiveRate = c.receiveRateCentsPerPallet;
     const shipRate = c.shipRateCentsPerPallet;
-    const storageChargeCents =
-      storageRate != null && peak > 0 ? peak * storageRate : 0;
+
+    // Pre-compute charges for ALL bases so the UI can flip without a
+    // re-roundtrip. Keep integer cents; round once per number.
+    const storageByBasis: Record<StorageBasis, number> = {
+      peak: storageRate != null ? Math.max(0, peak) * storageRate : 0,
+      average:
+        storageRate != null
+          ? Math.round(Math.max(0, averageCount) * storageRate)
+          : 0,
+      pallet_days:
+        storageRate != null
+          ? Math.round((Math.max(0, palletDays) * storageRate) / 30)
+          : 0,
+    };
+    const storageChargeCents = storageByBasis[basis];
     const receiveChargeCents =
       receiveRate != null && receives > 0 ? receives * receiveRate : 0;
     const shipChargeCents =
@@ -157,11 +195,15 @@ export async function computeBillingPeriod(
       openingCount: Math.max(0, opening),
       currentCount: Math.max(0, running),
       peakCount: Math.max(0, peak),
+      averageCount: Math.max(0, Math.round(averageCount * 100) / 100),
+      palletDays: Math.max(0, Math.round(palletDays * 100) / 100),
       receives,
       ships,
       storageRateCentsPerPalletMonth: storageRate,
       receiveRateCentsPerPallet: receiveRate,
       shipRateCentsPerPallet: shipRate,
+      storageBasis: basis,
+      storageChargeByBasisCents: storageByBasis,
       storageChargeCents,
       receiveChargeCents,
       shipChargeCents,
@@ -172,4 +214,65 @@ export async function computeBillingPeriod(
     });
   }
   return out.sort((a, b) => a.customerName.localeCompare(b.customerName));
+}
+
+/**
+ * Recompute charges with custom rates / a different storage basis.
+ * Used when a manager applies one-off overrides at bill-time without
+ * permanently changing the customer's saved rates. Pure math against
+ * the row's already-computed counts — no DB hit.
+ */
+export type RateOverrides = {
+  storageRateCentsPerPalletMonth?: number;
+  receiveRateCentsPerPallet?: number;
+  shipRateCentsPerPallet?: number;
+};
+
+export function applyRatesToRow(
+  row: BillingRow,
+  basis: StorageBasis,
+  overrides?: RateOverrides,
+): {
+  storageCharge: number;
+  receiveCharge: number;
+  shipCharge: number;
+  total: number;
+  storageRate: number;
+  receiveRate: number;
+  shipRate: number;
+  storageQty: number;
+} {
+  const storageRate =
+    overrides?.storageRateCentsPerPalletMonth ??
+    row.storageRateCentsPerPalletMonth ??
+    0;
+  const receiveRate =
+    overrides?.receiveRateCentsPerPallet ?? row.receiveRateCentsPerPallet ?? 0;
+  const shipRate =
+    overrides?.shipRateCentsPerPallet ?? row.shipRateCentsPerPallet ?? 0;
+
+  let storageQty: number;
+  let storageCharge: number;
+  if (basis === "peak") {
+    storageQty = row.peakCount;
+    storageCharge = Math.round(storageQty * storageRate);
+  } else if (basis === "average") {
+    storageQty = row.averageCount;
+    storageCharge = Math.round(storageQty * storageRate);
+  } else {
+    storageQty = row.palletDays;
+    storageCharge = Math.round((storageQty * storageRate) / 30);
+  }
+  const receiveCharge = row.receives * receiveRate;
+  const shipCharge = row.ships * shipRate;
+  return {
+    storageCharge,
+    receiveCharge,
+    shipCharge,
+    total: storageCharge + receiveCharge + shipCharge,
+    storageRate,
+    receiveRate,
+    shipRate,
+    storageQty,
+  };
 }

@@ -3,7 +3,12 @@ import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { qboFetch, refreshAccessToken, type QboConnection } from "./client";
 import { findOrCreateCustomer } from "./refs";
-import type { BillingRow } from "../billing/calculate";
+import {
+  applyRatesToRow,
+  type BillingRow,
+  type RateOverrides,
+  type StorageBasis,
+} from "../billing/calculate";
 
 /**
  * QBO invoice push for a single per-customer billing period. Mirrors
@@ -112,71 +117,134 @@ export function periodLabel(from: Date): string {
   return `${y}-${m}`;
 }
 
+export type BillingExtraLine = {
+  description: string;
+  amountCents: number; // negative is allowed for discounts
+};
+
+export type PostBillingInvoiceOptions = {
+  storageBasis?: StorageBasis;
+  overrides?: RateOverrides;
+  extraLines?: BillingExtraLine[];
+  /** Free-text memo printed on the QBO invoice (and PDF). */
+  memo?: string;
+  /** Days from invoice date to due date (Net N). */
+  dueInDays?: number;
+};
+
+const STORAGE_BASIS_LABEL: Record<StorageBasis, string> = {
+  peak: "peak",
+  average: "average",
+  pallet_days: "pallet-days",
+};
+
+function fmtStorageQty(basis: StorageBasis, qty: number): string {
+  if (basis === "pallet_days") return qty.toFixed(2);
+  if (basis === "average") return qty.toFixed(2);
+  return String(Math.round(qty));
+}
+
 /**
- * Post a QBO Invoice with up to three lines covering this billing
- * period. Skips lines whose charge is zero (e.g. a customer with no
- * shipments that month doesn't get a $0 outbound-handling line).
+ * Post a QBO Invoice with up to three computed lines + any caller-
+ * supplied extras (one-off fees, discounts as negative amounts).
+ * Honors per-bill rate overrides + storage basis without mutating the
+ * customer's saved rates. Skips lines whose charge is zero.
  */
 export async function postBillingInvoice(
   conn: QboConnection,
   customerNameForQbo: string,
   row: BillingRow,
   from: Date,
+  options: PostBillingInvoiceOptions = {},
 ): Promise<{ qboId: string }> {
   const customerId = await findOrCreateCustomer(conn, customerNameForQbo);
+  const basis = options.storageBasis ?? row.storageBasis;
+  const charges = applyRatesToRow(row, basis, options.overrides);
 
   const period = periodLabel(from);
   const lines: Array<Record<string, unknown>> = [];
 
-  if (row.storageChargeCents > 0) {
+  if (charges.storageCharge > 0) {
     const itemId = await findOrCreateServiceItem(conn, STORAGE_ITEM);
     lines.push({
       DetailType: "SalesItemLineDetail",
-      Amount: row.storageChargeCents / 100,
-      Description: `Storage — ${row.peakCount} pallet(s) peak in ${period}`,
+      Amount: charges.storageCharge / 100,
+      Description: `Storage — ${fmtStorageQty(basis, charges.storageQty)} ${STORAGE_BASIS_LABEL[basis]} in ${period}`,
       SalesItemLineDetail: {
         ItemRef: { value: itemId },
-        Qty: row.peakCount,
-        UnitPrice: (row.storageRateCentsPerPalletMonth ?? 0) / 100,
+        Qty: basis === "peak" ? Math.round(charges.storageQty) : Number(charges.storageQty.toFixed(2)),
+        UnitPrice: charges.storageRate / 100,
       },
     });
   }
-  if (row.receiveChargeCents > 0) {
+  if (charges.receiveCharge > 0) {
     const itemId = await findOrCreateServiceItem(conn, INBOUND_ITEM);
     lines.push({
       DetailType: "SalesItemLineDetail",
-      Amount: row.receiveChargeCents / 100,
+      Amount: charges.receiveCharge / 100,
       Description: `Inbound handling — ${row.receives} pallet(s) received in ${period}`,
       SalesItemLineDetail: {
         ItemRef: { value: itemId },
         Qty: row.receives,
-        UnitPrice: (row.receiveRateCentsPerPallet ?? 0) / 100,
+        UnitPrice: charges.receiveRate / 100,
       },
     });
   }
-  if (row.shipChargeCents > 0) {
+  if (charges.shipCharge > 0) {
     const itemId = await findOrCreateServiceItem(conn, OUTBOUND_ITEM);
     lines.push({
       DetailType: "SalesItemLineDetail",
-      Amount: row.shipChargeCents / 100,
+      Amount: charges.shipCharge / 100,
       Description: `Outbound handling — ${row.ships} pallet(s) shipped in ${period}`,
       SalesItemLineDetail: {
         ItemRef: { value: itemId },
         Qty: row.ships,
-        UnitPrice: (row.shipRateCentsPerPallet ?? 0) / 100,
+        UnitPrice: charges.shipRate / 100,
       },
     });
+  }
+
+  // Ad-hoc lines: fees, discounts (negative), accessorials. We use
+  // SalesItemLineDetail keyed to the storage item so QBO accepts the
+  // line without forcing the user to pre-create a "Misc" item; the
+  // description carries the meaning. Set Qty=1 / UnitPrice=amount so
+  // QBO computes Amount cleanly.
+  if (options.extraLines && options.extraLines.length > 0) {
+    const fallbackItemId = await findOrCreateServiceItem(conn, STORAGE_ITEM);
+    for (const extra of options.extraLines) {
+      const desc = (extra.description ?? "").trim().slice(0, 200);
+      if (!desc || extra.amountCents === 0) continue;
+      lines.push({
+        DetailType: "SalesItemLineDetail",
+        Amount: extra.amountCents / 100,
+        Description: desc,
+        SalesItemLineDetail: {
+          ItemRef: { value: fallbackItemId },
+          Qty: 1,
+          UnitPrice: extra.amountCents / 100,
+        },
+      });
+    }
   }
 
   if (lines.length === 0) {
     throw new Error("No billable charges for this period.");
   }
 
-  const invoice = {
+  const invoice: Record<string, unknown> = {
     CustomerRef: { value: customerId },
     DocNumber: `STG-${period}-${row.customerId.slice(0, 6)}`,
     Line: lines,
   };
+  if (options.memo && options.memo.trim()) {
+    invoice.CustomerMemo = { value: options.memo.trim().slice(0, 1000) };
+  }
+  if (options.dueInDays != null && options.dueInDays >= 0) {
+    const dueDate = new Date();
+    dueDate.setUTCDate(dueDate.getUTCDate() + options.dueInDays);
+    invoice.DueDate = dueDate.toISOString().slice(0, 10);
+  }
+
   const res = await qboFetch<{ Invoice: { Id: string } }>(conn, "/invoice", {
     method: "POST",
     body: invoice,

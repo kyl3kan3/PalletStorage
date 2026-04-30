@@ -17,7 +17,7 @@ import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
-import { computeBillingPeriod } from "../billing/calculate";
+import { applyRatesToRow, computeBillingPeriod } from "../billing/calculate";
 import { loadQbConnection, postBillingInvoice, periodLabel } from "../quickbooks/billing";
 
 // Shared zod input for date-range reports. Both sides optional so a
@@ -459,6 +459,9 @@ export const reportRouter = router({
         from: z.date(),
         to: z.date(),
         customerId: z.string().uuid().optional(),
+        storageBasis: z
+          .enum(["peak", "average", "pallet_days"])
+          .optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -469,15 +472,23 @@ export const reportRouter = router({
         input.customerId ?? null,
         input.from,
         input.to,
+        { storageBasis: input.storageBasis },
       );
-      return { from: input.from, to: input.to, rows };
+      return {
+        from: input.from,
+        to: input.to,
+        storageBasis: input.storageBasis ?? "peak",
+        rows,
+      };
     }),
 
   /**
-   * Push a single customer's monthly bill into QuickBooks as an
-   * Invoice. Refuses if the customer doesn't have all three rates
-   * set, or if the period has zero billable charges. Records a row
-   * in quickbooks_exports for audit.
+   * Push a single customer's bill into QuickBooks as an Invoice.
+   * Accepts optional per-bill rate overrides, a different storage
+   * basis, ad-hoc extra lines, a memo, and a Net-N due-date offset —
+   * none of which mutate the customer's saved settings. Refuses if
+   * the customer has no rates set or the period nets to zero unless
+   * the caller supplies extra lines that bring it positive.
    */
   exportCustomerBillToQuickbooks: managerProcedure
     .input(
@@ -485,6 +496,27 @@ export const reportRouter = router({
         customerId: z.string().uuid(),
         from: z.date(),
         to: z.date(),
+        storageBasis: z
+          .enum(["peak", "average", "pallet_days"])
+          .optional(),
+        overrides: z
+          .object({
+            storageRateCentsPerPalletMonth: z.number().int().min(0).optional(),
+            receiveRateCentsPerPallet: z.number().int().min(0).optional(),
+            shipRateCentsPerPallet: z.number().int().min(0).optional(),
+          })
+          .optional(),
+        extraLines: z
+          .array(
+            z.object({
+              description: z.string().trim().min(1).max(200),
+              amountCents: z.number().int(),
+            }),
+          )
+          .max(20)
+          .optional(),
+        memo: z.string().trim().max(1000).optional(),
+        dueInDays: z.number().int().min(0).max(365).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -495,18 +527,28 @@ export const reportRouter = router({
         input.customerId,
         input.from,
         input.to,
+        { storageBasis: input.storageBasis },
       );
       const row = rows[0];
       if (!row) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
       }
-      if (!row.hasRates) {
+      if (!row.hasRates && !input.overrides) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: `Set storage / receive / ship rates on ${row.customerName} before exporting.`,
+          message: `Set storage / receive / ship rates on ${row.customerName} (or supply overrides) before exporting.`,
         });
       }
-      if (row.totalChargeCents <= 0) {
+      const charges = applyRatesToRow(
+        row,
+        input.storageBasis ?? row.storageBasis,
+        input.overrides,
+      );
+      const extraTotal = (input.extraLines ?? []).reduce(
+        (n, l) => n + l.amountCents,
+        0,
+      );
+      if (charges.total + extraTotal <= 0) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "No billable charges for this period — nothing to export.",
@@ -518,6 +560,13 @@ export const reportRouter = router({
         row.customerName,
         row,
         input.from,
+        {
+          storageBasis: input.storageBasis,
+          overrides: input.overrides,
+          extraLines: input.extraLines,
+          memo: input.memo,
+          dueInDays: input.dueInDays,
+        },
       );
       await ctx.db.insert(schema.quickbooksExports).values({
         organizationId: orgId,
