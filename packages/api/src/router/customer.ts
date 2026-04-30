@@ -3,7 +3,7 @@ import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
-import { router, tenantProcedure, managerProcedure } from "../trpc";
+import { router, tenantProcedure, managerProcedure, adminProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 
 // Shared profile schema — used by create + update.
@@ -181,9 +181,8 @@ export const customerRouter = router({
     }),
 
   /**
-   * Soft-delete: just flips `active` off. Hard delete is risky because
-   * pallets/orders may reference the row (FK is ON DELETE SET NULL,
-   * which would quietly orphan the linkage).
+   * Soft-delete: just flips `active` off. Reversible — most teams should
+   * use this. Available to managers + admins.
    */
   deactivate: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
@@ -203,6 +202,89 @@ export const customerRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
       }
       return { ok: true };
+    }),
+
+  /**
+   * Hard-delete. Admin only. Refuses by default if the customer has
+   * stored pallets or non-terminal orders — those would silently orphan
+   * (FKs are ON DELETE SET NULL) and disappear from billing because
+   * `computeBillingPeriod` filters customer_id IS NOT NULL.
+   *
+   * Pass `force: true` after the user explicitly acknowledges. Past
+   * `quickbooks_exports` rows are intentionally NOT cleaned up — they're
+   * an immutable audit of what was actually pushed to QBO.
+   */
+  delete: adminProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        force: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+
+      const [storedPalletsRow, openInboundRow, openOutboundRow] = await Promise.all([
+        ctx.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.pallets)
+          .where(
+            and(
+              eq(schema.pallets.organizationId, orgId),
+              eq(schema.pallets.customerId, input.id),
+              eq(schema.pallets.status, "stored"),
+            ),
+          ),
+        ctx.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.inboundOrders)
+          .where(
+            and(
+              eq(schema.inboundOrders.organizationId, orgId),
+              eq(schema.inboundOrders.customerId, input.id),
+              sql`${schema.inboundOrders.status} in ('open','receiving')`,
+            ),
+          ),
+        ctx.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.outboundOrders)
+          .where(
+            and(
+              eq(schema.outboundOrders.organizationId, orgId),
+              eq(schema.outboundOrders.customerId, input.id),
+              sql`${schema.outboundOrders.status} in ('open','picking','packed')`,
+            ),
+          ),
+      ]);
+      const blockers = {
+        storedPallets: storedPalletsRow[0]?.n ?? 0,
+        openInbound: openInboundRow[0]?.n ?? 0,
+        openOutbound: openOutboundRow[0]?.n ?? 0,
+      };
+      const total =
+        blockers.storedPallets + blockers.openInbound + blockers.openOutbound;
+
+      if (total > 0 && !input.force) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Customer has ${blockers.storedPallets} stored pallet(s), ${blockers.openInbound} open inbound, and ${blockers.openOutbound} open outbound. Resolve those or pass force=true to orphan them.`,
+          cause: blockers,
+        });
+      }
+
+      const result = await ctx.db
+        .delete(schema.customers)
+        .where(
+          and(
+            eq(schema.customers.id, input.id),
+            eq(schema.customers.organizationId, orgId),
+          ),
+        )
+        .returning({ id: schema.customers.id });
+      if (result.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+      }
+      return { ok: true, blockers };
     }),
 
   /**

@@ -1,15 +1,17 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, StatBig, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { BackLink } from "~/components/back-link";
-import { useIsManager } from "~/lib/useRole";
+import { useIsAdmin, useIsManager } from "~/lib/useRole";
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
+  const router = useRouter();
   const { id } = use(params);
   const utils = trpc.useUtils();
   const q = trpc.customer.byId.useQuery({ id });
@@ -19,12 +21,43 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       utils.customer.list.invalidate();
     },
   });
+  const deleteCustomer = trpc.customer.delete.useMutation({
+    onSuccess: () => {
+      utils.customer.list.invalidate();
+      router.push("/customers");
+    },
+  });
   const updateCustomer = trpc.customer.update.useMutation({
     onSuccess: () => utils.customer.byId.invalidate({ id }),
   });
 
   const c = q.data?.customer;
   const isManager = useIsManager();
+  const isAdmin = useIsAdmin();
+
+  function handleDelete() {
+    if (!c) return;
+    const typed = window.prompt(
+      `This permanently deletes ${c.name}. Stored pallets and open orders will become unassigned.\n\nType the customer name to confirm:`,
+    );
+    if (typed === null) return; // cancel
+    if (typed.trim().toLowerCase() !== c.name.trim().toLowerCase()) {
+      window.alert("Name didn't match — delete cancelled.");
+      return;
+    }
+    deleteCustomer.mutate(
+      { id },
+      {
+        onError: (err) => {
+          if (err.data?.code !== "PRECONDITION_FAILED") return;
+          const proceed = window.confirm(
+            `${err.message}\n\nDelete anyway and orphan them?`,
+          );
+          if (proceed) deleteCustomer.mutate({ id, force: true });
+        },
+      },
+    );
+  }
 
   // Billing-rate edit state. Stored in DOLLARS as a string so the
   // input is friendly; converted to integer cents on save.
@@ -60,34 +93,49 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         title={c?.name ?? "Customer"}
         subtitle={c?.contactName ?? undefined}
         right={
-          c?.active ? (
-            isManager ? (
-              <div style={{ display: "flex", gap: 8 }}>
-                <a
-                  href={`/customers/import?customerId=${id}`}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Btn t={t} variant="secondary" size="sm" icon={Ic.Upload}>
-                    Import sheet
+          c ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {!c.active && (
+                <Tag t={t} tone="neutral">
+                  inactive
+                </Tag>
+              )}
+              {c.active && isManager && (
+                <>
+                  <a
+                    href={`/customers/import?customerId=${id}`}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <Btn t={t} variant="secondary" size="sm" icon={Ic.Upload}>
+                      Import sheet
+                    </Btn>
+                  </a>
+                  <Btn
+                    t={t}
+                    variant="secondary"
+                    size="sm"
+                    icon={Ic.X}
+                    disabled={deactivate.isPending}
+                    onClick={() => deactivate.mutate({ id })}
+                  >
+                    {deactivate.isPending ? "Deactivating…" : "Deactivate"}
                   </Btn>
-                </a>
+                </>
+              )}
+              {isAdmin && (
                 <Btn
                   t={t}
-                  variant="secondary"
+                  variant="danger"
                   size="sm"
                   icon={Ic.X}
-                  disabled={deactivate.isPending}
-                  onClick={() => deactivate.mutate({ id })}
+                  disabled={deleteCustomer.isPending}
+                  onClick={handleDelete}
                 >
-                  {deactivate.isPending ? "Deactivating…" : "Deactivate"}
+                  {deleteCustomer.isPending ? "Deleting…" : "Delete"}
                 </Btn>
-              </div>
-            ) : null
-          ) : (
-            <Tag t={t} tone="neutral">
-              inactive
-            </Tag>
-          )
+              )}
+            </div>
+          ) : null
         }
       />
 
