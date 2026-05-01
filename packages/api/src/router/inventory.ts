@@ -23,6 +23,7 @@ export const inventoryRouter = router({
       z
         .object({
           warehouseId: z.string().uuid().optional(),
+          customerId: z.string().uuid().optional(),
           q: z.string().trim().default(""),
           status: z
             .enum(["in_transit", "received", "stored", "picked", "shipped", "damaged"])
@@ -53,16 +54,22 @@ export const inventoryRouter = router({
           lot: schema.palletItems.lot,
           expiry: schema.palletItems.expiry,
           palletCreatedAt: schema.pallets.createdAt,
+          customerId: schema.pallets.customerId,
+          customerName: schema.customers.name,
         })
         .from(schema.palletItems)
         .innerJoin(schema.pallets, eq(schema.pallets.id, schema.palletItems.palletId))
         .innerJoin(schema.products, eq(schema.products.id, schema.palletItems.productId))
         .innerJoin(schema.warehouses, eq(schema.warehouses.id, schema.pallets.warehouseId))
         .leftJoin(schema.locations, eq(schema.locations.id, schema.pallets.currentLocationId))
+        .leftJoin(schema.customers, eq(schema.customers.id, schema.pallets.customerId))
         .where(
           and(
             eq(schema.palletItems.organizationId, orgId),
             input.warehouseId ? eq(schema.pallets.warehouseId, input.warehouseId) : undefined,
+            input.customerId
+              ? eq(schema.pallets.customerId, input.customerId)
+              : undefined,
             input.status ? eq(schema.pallets.status, input.status) : undefined,
             q
               ? or(
@@ -71,6 +78,7 @@ export const inventoryRouter = router({
                   ilike(schema.pallets.lpn, q),
                   ilike(schema.locations.code, q),
                   ilike(schema.palletItems.lot, q),
+                  ilike(schema.customers.name, q),
                 )
               : undefined,
           ),
@@ -84,6 +92,7 @@ export const inventoryRouter = router({
       z
         .object({
           warehouseId: z.string().uuid().optional(),
+          customerId: z.string().uuid().optional(),
           q: z.string().trim().default(""),
         })
         .default({}),
@@ -116,7 +125,12 @@ export const inventoryRouter = router({
           schema.pallets,
           and(
             eq(schema.pallets.id, schema.palletItems.palletId),
-            input.warehouseId ? eq(schema.pallets.warehouseId, input.warehouseId) : undefined,
+            input.warehouseId
+              ? eq(schema.pallets.warehouseId, input.warehouseId)
+              : undefined,
+            input.customerId
+              ? eq(schema.pallets.customerId, input.customerId)
+              : undefined,
           ),
         )
         .where(

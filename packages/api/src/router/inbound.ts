@@ -485,7 +485,7 @@ export const inboundRouter = router({
   parseFromDocument: managerProcedure
     .input(
       z.object({
-        text: z.string().trim().max(40_000).optional(),
+        text: z.string().trim().max(200_000).optional(),
         imageDataUrl: z
           .string()
           .regex(/^data:image\/(png|jpeg);base64,/)
@@ -567,6 +567,7 @@ export const inboundRouter = router({
         "      qty: integer quantity",
         '      qtyUnit: one of "each", "case", or "pallet" — pick the unit the qty is in. PALLET is most common on a packing slip / BOL ("12 pallets of widget X"); use "case" for case counts; default "each" only if truly uncertain.',
         "Skip footer / total / grand-total rows and decorative text. Treat repeated header lines (one per page on a multi-page doc) as one.",
+        "PROCESS EVERY LINE in the input — do not summarize, truncate, or stop early. The text below may include MULTIPLE Excel sheets/tabs separated by '--- <sheet name> ---' markers, OR multiple PDF pages joined together; treat them all as one document and emit every line item.",
         'Return strict JSON: {"reference":"...","supplierName":"...","customerName":"...","expectedAt":"YYYY-MM-DD or YYYY-MM-DDTHH:MM:00","lines":[{"productName":"...","sku":"...","qty":1,"qtyUnit":"each"},...]}.',
         "Omit fields whose value is unknown rather than guessing.",
       ]
@@ -596,7 +597,7 @@ export const inboundRouter = router({
           model: "gpt-4o-mini",
           response_format: { type: "json_object" },
           messages: [{ role: "user", content: messageContent }],
-          max_tokens: 4000,
+          max_tokens: 16_000,
           temperature: 0,
         }),
       });

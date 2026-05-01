@@ -301,7 +301,9 @@ export const customerRouter = router({
           customerId: z.string().uuid().optional(),
           // Either text (paste / .xlsx / .pdf extract) or an image
           // data URL (phone photo / scan). At least one must be set.
-          text: z.string().trim().max(40_000).optional(),
+          // 200k is comfortable for multi-tab spreadsheets and well
+          // under gpt-4o-mini's 128k token context.
+          text: z.string().trim().max(200_000).optional(),
           imageDataUrl: z
             .string()
             .regex(/^data:image\/(png|jpeg);base64,/)
@@ -396,6 +398,7 @@ export const customerRouter = router({
         "  - receiveRateCentsPerPallet: e.g. 'handling fee per pallet' -> 2200",
         "  - shipRateCentsPerPallet: omit if not stated (3PLs often only charge the handling fee on the way in)",
         "Skip header rows, total rows, blank rows, and metadata that isn't customer info.",
+        "PROCESS EVERY PALLET ROW in the input — do not summarize, truncate, or stop early. The text below may include MULTIPLE Excel sheets/tabs separated by '--- <sheet name> ---' markers; treat each tab as part of the same dataset and emit a row for every pallet from every tab.",
         knownCustomerName
           ? 'Return strict JSON: {"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}'
           : 'Return strict JSON: {"detectedCustomer":{"name":"...","email":"...","taxId":"...","billingLine1":"...","billingCity":"...","billingRegion":"...","billingPostalCode":"...","billingCountry":"...","notes":"..."},"detectedRates":{...optional...},"rows":[{"productName":"...","qty":1,"inDate":"YYYY-MM-DD","outDate":"YYYY-MM-DD","lot":"...","expiry":"YYYY-MM-DD"},...]}',
@@ -433,7 +436,10 @@ export const customerRouter = router({
           model: "gpt-4o-mini",
           response_format: { type: "json_object" },
           messages: [{ role: "user", content: messageContent }],
-          max_tokens: 4000,
+          // 16k is gpt-4o-mini's max output. A spreadsheet with several
+          // hundred pallet rows will saturate the previous 4k cap and
+          // get cut off mid-array.
+          max_tokens: 16_000,
           temperature: 0,
         }),
       });

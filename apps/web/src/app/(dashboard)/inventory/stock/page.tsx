@@ -22,11 +22,13 @@ export default function StockPage() {
   const [tab, setTab] = useState<"product" | "pallet">("product");
   const [q, setQ] = useState("");
   const [warehouseId, setWarehouseId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>("");
   const [status, setStatus] = useState<
     "" | "in_transit" | "received" | "stored" | "picked" | "shipped" | "damaged"
   >("");
 
   const warehouses = trpc.warehouse.list.useQuery();
+  const customers = trpc.customer.list.useQuery();
   const utils = trpc.useUtils();
   const movePallet = trpc.pallet.move.useMutation({
     onSuccess: () => {
@@ -35,13 +37,18 @@ export default function StockPage() {
     },
   });
   const byProduct = trpc.inventory.byProduct.useQuery(
-    { q, warehouseId: warehouseId || undefined },
+    {
+      q,
+      warehouseId: warehouseId || undefined,
+      customerId: customerId || undefined,
+    },
     { enabled: tab === "product" },
   );
   const byPallet = trpc.inventory.byPallet.useQuery(
     {
       q,
       warehouseId: warehouseId || undefined,
+      customerId: customerId || undefined,
       status: status || undefined,
     },
     { enabled: tab === "pallet" },
@@ -124,6 +131,19 @@ export default function StockPage() {
           {warehouses.data?.map((w) => (
             <option key={w.id} value={w.id}>
               {w.code} — {w.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={customerId}
+          onChange={(e) => setCustomerId(e.target.value)}
+          style={selectStyle(t)}
+        >
+          <option value="">All customers</option>
+          {customers.data?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {!c.active ? " (inactive)" : ""}
             </option>
           ))}
         </select>
@@ -210,7 +230,7 @@ export default function StockPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px 200px",
+              gridTemplateColumns: "120px 1.4fr 1.1fr 100px 90px 90px 100px 100px 200px",
               gap: 12,
               padding: "12px 16px",
               fontSize: 10.5,
@@ -222,6 +242,7 @@ export default function StockPage() {
           >
             <div>Pallet (LPN)</div>
             <div>Product</div>
+            <div>Customer</div>
             <div>Location</div>
             <div>Status</div>
             <div>Qty</div>
@@ -234,7 +255,7 @@ export default function StockPage() {
               key={r.palletItemId}
               style={{
                 display: "grid",
-                gridTemplateColumns: "120px 1.4fr 100px 90px 90px 100px 100px 200px",
+                gridTemplateColumns: "120px 1.4fr 1.1fr 100px 90px 90px 100px 100px 200px",
                 gap: 12,
                 padding: "10px 16px",
                 borderTop: `1.5px dashed ${t.border}`,
@@ -251,6 +272,9 @@ export default function StockPage() {
                 <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: t.muted }}>
                   {r.productSku ?? "(no SKU)"}
                 </div>
+              </div>
+              <div style={{ fontSize: 12.5, color: r.customerName ? t.body : t.muted }}>
+                {r.customerName ?? "—"}
               </div>
               <div style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
                 {r.locationCode ?? "—"}
