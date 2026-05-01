@@ -97,6 +97,9 @@ export default function ImportInventoryPage() {
   });
   const apply = trpc.customer.applyInventoryImport.useMutation({
     onSuccess: (res) => {
+      // If everything was a duplicate, stay on the page so the user
+      // can read the chip — otherwise redirect to the customer.
+      if (res.palletsCreated === 0 && res.palletsSkipped > 0) return;
       router.push(`/customers/${res.customerId}` as Route);
     },
   });
@@ -882,6 +885,35 @@ export default function ImportInventoryPage() {
               }}
             >
               {apply.error.message}
+            </div>
+          )}
+          {apply.data && (
+            <div
+              style={{
+                marginTop: 10,
+                background: t.surfaceAlt,
+                color: t.body,
+                padding: "10px 14px",
+                borderRadius: 10,
+                fontSize: 13,
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <Tag t={t} tone="mint">
+                {apply.data.palletsCreated} created
+              </Tag>
+              {apply.data.palletsSkipped > 0 && (
+                <Tag t={t} tone="neutral">
+                  {apply.data.palletsSkipped} skipped (already on file)
+                </Tag>
+              )}
+              {apply.data.palletsCreated === 0 &&
+                apply.data.palletsSkipped > 0 && (
+                  <span>Nothing new to add — every row matched an existing pallet.</span>
+                )}
             </div>
           )}
         </Card>

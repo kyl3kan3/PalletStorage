@@ -701,13 +701,65 @@ export const customerRouter = router({
       if (!warehouse) throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
 
       return ctx.db.transaction(async (tx) => {
+        // 0. Pre-fetch this customer's existing inventory so we can
+        //    skip rows that already exist. Match key = productId + lot
+        //    + expiry-date + in-date (the date of the first `receive`
+        //    movement). All four matching is the strongest "this is
+        //    the same pallet" signal we have without an LPN on the
+        //    sheet.
+        const existing = await tx
+          .select({
+            productId: schema.palletItems.productId,
+            lot: schema.palletItems.lot,
+            expiry: schema.palletItems.expiry,
+            receivedAt: schema.movements.createdAt,
+          })
+          .from(schema.palletItems)
+          .innerJoin(
+            schema.pallets,
+            eq(schema.pallets.id, schema.palletItems.palletId),
+          )
+          .leftJoin(
+            schema.movements,
+            and(
+              eq(schema.movements.palletId, schema.pallets.id),
+              eq(schema.movements.reason, "receive"),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.palletItems.organizationId, orgId),
+              eq(schema.pallets.customerId, resolvedCustomerId),
+            ),
+          );
+        const dedupeKey = (
+          productId: string,
+          lot: string | null | undefined,
+          expiry: Date | string | null | undefined,
+          inDate: Date | string,
+        ): string => {
+          const lotKey = (lot ?? "").trim().toLowerCase();
+          const expiryKey = expiry
+            ? new Date(expiry).toISOString().slice(0, 10)
+            : "";
+          const inKey = new Date(inDate).toISOString().slice(0, 10);
+          return `${productId}|${lotKey}|${expiryKey}|${inKey}`;
+        };
+        const existingKeys = new Set<string>();
+        for (const e of existing) {
+          if (!e.receivedAt) continue;
+          existingKeys.add(
+            dedupeKey(e.productId, e.lot, e.expiry, e.receivedAt),
+          );
+        }
+
         // 1. Resolve product ids — find by name (case-insensitive, trimmed)
         //    or auto-create. Cache by name so duplicate rows hit the DB once.
         const productCache = new Map<string, string>();
         for (const row of input.rows) {
           const key = row.productName.trim().toLowerCase();
           if (productCache.has(key)) continue;
-          const [existing] = await tx
+          const [existingProduct] = await tx
             .select({ id: schema.products.id })
             .from(schema.products)
             .where(
@@ -717,8 +769,8 @@ export const customerRouter = router({
               ),
             )
             .limit(1);
-          if (existing) {
-            productCache.set(key, existing.id);
+          if (existingProduct) {
+            productCache.set(key, existingProduct.id);
             continue;
           }
           // Generate a placeholder SKU so the insert succeeds even if
@@ -743,11 +795,23 @@ export const customerRouter = router({
           productCache.set(key, created.id);
         }
 
-        // 2. For each row: create pallet + pallet_item + movements.
+        // 2. For each row: skip if dupe, else create pallet + item + movements.
         let palletsCreated = 0;
-        let productsCreated = productCache.size; // initial heuristic
+        let palletsSkipped = 0;
+        const productsCreated = productCache.size;
         for (const row of input.rows) {
-          const productId = productCache.get(row.productName.trim().toLowerCase())!;
+          const productId = productCache.get(
+            row.productName.trim().toLowerCase(),
+          )!;
+          const key = dedupeKey(productId, row.lot, row.expiry, row.inDate);
+          if (existingKeys.has(key)) {
+            palletsSkipped += 1;
+            continue;
+          }
+          // Mark this key seen so a sheet that lists the same pallet
+          // twice within itself doesn't double-insert either.
+          existingKeys.add(key);
+
           const inDate = new Date(row.inDate);
           const outDate = row.outDate ? new Date(row.outDate) : null;
           const lpn = generateLPN();
@@ -819,7 +883,12 @@ export const customerRouter = router({
           }
         }
 
-        return { palletsCreated, productsCreated, customerId: resolvedCustomerId };
+        return {
+          palletsCreated,
+          palletsSkipped,
+          productsCreated,
+          customerId: resolvedCustomerId,
+        };
       });
     }),
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
@@ -19,10 +20,15 @@ import { Ic } from "~/components/icons";
  */
 export default function StockPage() {
   const t = theme;
-  const [tab, setTab] = useState<"product" | "pallet">("product");
+  const sp = useSearchParams();
+  // Default to "By pallet" when arriving with a customer pre-selected,
+  // so the inventory column is visible immediately.
+  const [tab, setTab] = useState<"product" | "pallet">(
+    sp.get("customer") ? "pallet" : "product",
+  );
   const [q, setQ] = useState("");
   const [warehouseId, setWarehouseId] = useState<string>("");
-  const [customerId, setCustomerId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>(sp.get("customer") ?? "");
   const [status, setStatus] = useState<
     "" | "in_transit" | "received" | "stored" | "picked" | "shipped" | "damaged"
   >("");

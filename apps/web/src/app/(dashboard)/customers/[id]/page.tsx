@@ -1,6 +1,8 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
@@ -34,6 +36,14 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const c = q.data?.customer;
   const isManager = useIsManager();
   const isAdmin = useIsAdmin();
+
+  // Customer-scoped inventory. Pulled lazily once we know the row
+  // exists; capped at 200 pallet-items so a customer with thousands
+  // of pallets doesn't blow the page.
+  const inventory = trpc.inventory.byPallet.useQuery(
+    { customerId: id, limit: 200 },
+    { enabled: !!c },
+  );
 
   function handleDelete() {
     if (!c) return;
@@ -329,6 +339,162 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           )}
         </Card>
       </div>
+
+      <Card t={t} padding={0} style={{ marginTop: 20 }}>
+        <div
+          style={{
+            padding: "14px 18px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: `1.5px solid ${t.border}`,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+                fontWeight: 600,
+              }}
+            >
+              Inventory
+            </div>
+            <div style={{ fontSize: 13, color: t.body, marginTop: 2 }}>
+              {inventory.data
+                ? `${inventory.data.length} pallet item${
+                    inventory.data.length === 1 ? "" : "s"
+                  }${inventory.data.length >= 200 ? " (showing first 200 — see /inventory/stock)" : ""}`
+                : "Loading…"}
+            </div>
+          </div>
+          <Link
+            href={`/inventory/stock?customer=${id}` as Route}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn t={t} variant="secondary" size="sm" icon={Ic.Arrow}>
+              Open in inventory
+            </Btn>
+          </Link>
+        </div>
+        {inventory.data && inventory.data.length === 0 && (
+          <div
+            style={{
+              padding: "20px 18px",
+              fontSize: 13,
+              color: t.muted,
+            }}
+          >
+            No pallets on file for this customer yet.
+          </div>
+        )}
+        {inventory.data && inventory.data.length > 0 && (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "120px 1.4fr 100px 90px 70px 100px 100px",
+                gap: 12,
+                padding: "12px 18px",
+                fontSize: 10.5,
+                color: t.muted,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                fontWeight: 600,
+              }}
+            >
+              <div>Pallet (LPN)</div>
+              <div>Product</div>
+              <div>Location</div>
+              <div>Status</div>
+              <div>Qty</div>
+              <div>Lot</div>
+              <div>Expiry</div>
+            </div>
+            {inventory.data.map((r) => (
+              <div
+                key={r.palletItemId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "120px 1.4fr 100px 90px 70px 100px 100px",
+                  gap: 12,
+                  padding: "10px 18px",
+                  borderTop: `1.5px dashed ${t.border}`,
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.ink }}
+                >
+                  {r.palletLpn}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, color: t.ink, fontWeight: 600 }}>
+                    {r.productName}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: FONTS.mono,
+                      fontSize: 11,
+                      color: t.muted,
+                    }}
+                  >
+                    {r.productSku ?? "(no SKU)"}
+                  </div>
+                </div>
+                <div style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
+                  {r.locationCode ?? "—"}
+                </div>
+                <div>
+                  <Tag
+                    t={t}
+                    tone={
+                      r.palletStatus === "stored"
+                        ? "mint"
+                        : r.palletStatus === "received"
+                          ? "primary"
+                          : "neutral"
+                    }
+                  >
+                    {r.palletStatus}
+                  </Tag>
+                </div>
+                <div
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontWeight: 600,
+                    color: t.ink,
+                  }}
+                >
+                  {r.qty}
+                </div>
+                <div
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontSize: 11.5,
+                    color: t.muted,
+                  }}
+                >
+                  {r.lot ?? "—"}
+                </div>
+                <div
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontSize: 11.5,
+                    color: t.muted,
+                  }}
+                >
+                  {r.expiry ? new Date(r.expiry).toLocaleDateString() : "—"}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </Card>
     </div>
   );
 }
