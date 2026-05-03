@@ -536,7 +536,7 @@ export const reportRouter = router({
       if (!row.hasRates && !input.overrides) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: `Set storage / receive / ship rates on ${row.customerName} (or supply overrides) before exporting.`,
+          message: `Set storage and inbound rates on ${row.customerName} (or supply overrides) before exporting. Outbound is optional.`,
         });
       }
       const charges = applyRatesToRow(

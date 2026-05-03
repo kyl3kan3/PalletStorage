@@ -21,6 +21,11 @@ import { schema, type Db } from "@wms/db";
  * receives + ships are simple counts of in-window rows for the in/out
  * fees. Charges are integer-cent multiplies; no floats. Customers
  * without rates get all *Charge fields = 0 and hasRates=false.
+ *
+ * `hasRates` only requires storage + receive — the two fees most 3PLs
+ * actually invoice. Ship (outbound handling) is optional; if it's
+ * unset the outbound line just doesn't appear on the statement, and
+ * the QB push goes through anyway.
  */
 
 export type StorageBasis = "peak" | "average" | "pallet_days";
@@ -209,8 +214,7 @@ export async function computeBillingPeriod(
       shipChargeCents,
       totalChargeCents:
         storageChargeCents + receiveChargeCents + shipChargeCents,
-      hasRates:
-        storageRate != null && receiveRate != null && shipRate != null,
+      hasRates: storageRate != null && receiveRate != null,
     });
   }
   return out.sort((a, b) => a.customerName.localeCompare(b.customerName));
