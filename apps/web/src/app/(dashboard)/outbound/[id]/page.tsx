@@ -1026,43 +1026,134 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
               <div>Carrier</div>
               <div>Tracking</div>
               <div>Shipped</div>
-              <div>Print</div>
+              <div>BOL</div>
             </div>
             {shipmentsQ.data.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "160px 1fr 1fr 120px 120px",
-                  gap: 16,
-                  padding: "12px 20px",
-                  alignItems: "center",
-                  borderTop: `1.5px dashed ${t.border}`,
-                  fontSize: 13,
-                }}
-              >
-                <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
-                  {s.bolNumber}
-                </span>
-                <span>{s.carrier ?? "—"}</span>
-                <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>{s.trackingNumber ?? "—"}</span>
-                <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
-                  {s.shippedAt.toLocaleDateString()}
-                </span>
-                <a
-                  href={`/api/shipments/${s.id}/bol`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: t.primaryDeep, fontWeight: 600, textDecoration: "none" }}
-                >
-                  Download →
-                </a>
-              </div>
+              <ShipmentRow key={s.id} t={t} shipment={s} />
             ))}
           </Card>
         </div>
       )}
 
+    </div>
+  );
+}
+
+function ShipmentRow({
+  t,
+  shipment,
+}: {
+  t: typeof theme;
+  shipment: {
+    id: string;
+    bolNumber: string;
+    carrier: string | null;
+    trackingNumber: string | null;
+    shippedAt: Date;
+  };
+}) {
+  const [emailing, setEmailing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  async function emailBol() {
+    setEmailing(true);
+    setEmailMsg(null);
+    try {
+      const res = await fetch(`/api/shipments/${shipment.id}/email-bol`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        sent?: boolean;
+        to?: string[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      setEmailMsg({
+        kind: "ok",
+        text: `Emailed to ${data.to?.join(", ") ?? "customer"}`,
+      });
+    } catch (e) {
+      setEmailMsg({
+        kind: "err",
+        text: e instanceof Error ? e.message : "Couldn't send.",
+      });
+    } finally {
+      setEmailing(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "160px 1fr 1fr 120px 220px",
+        gap: 16,
+        padding: "12px 20px",
+        alignItems: "center",
+        borderTop: `1.5px dashed ${t.border}`,
+        fontSize: 13,
+      }}
+    >
+      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
+        {shipment.bolNumber}
+      </span>
+      <span>{shipment.carrier ?? "—"}</span>
+      <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
+        {shipment.trackingNumber ?? "—"}
+      </span>
+      <span style={{ color: t.muted, fontFamily: FONTS.mono, fontSize: 12 }}>
+        {shipment.shippedAt.toLocaleDateString()}
+      </span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <a
+          href={`/api/shipments/${shipment.id}/bol`}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            color: t.primaryDeep,
+            fontWeight: 600,
+            textDecoration: "none",
+            fontSize: 12.5,
+          }}
+        >
+          Download
+        </a>
+        <button
+          type="button"
+          onClick={emailBol}
+          disabled={emailing}
+          style={{
+            padding: "4px 10px",
+            borderRadius: 8,
+            background: t.surfaceAlt,
+            border: `1.5px solid ${t.border}`,
+            fontSize: 12,
+            fontWeight: 600,
+            color: t.ink,
+            cursor: emailing ? "progress" : "pointer",
+            fontFamily: FONTS.sans,
+          }}
+        >
+          {emailing ? "Sending…" : "Email customer"}
+        </button>
+        {emailMsg && (
+          <span
+            style={{
+              fontSize: 11,
+              color: emailMsg.kind === "ok" ? t.primaryDeep : t.coral,
+            }}
+          >
+            {emailMsg.text}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

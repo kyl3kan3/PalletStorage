@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tabs, Tag, type TabItem } from "~/components/kit";
@@ -36,6 +37,11 @@ export default function InboundListPage() {
         subtitle="POs on the way in, plus what's already on the dock."
         right={
           <div style={{ display: "flex", gap: 8 }}>
+            <Link href={"/schedule/new" as Route} style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Calendar}>
+                Schedule truck
+              </Btn>
+            </Link>
             <Link href="/inbound/import" style={{ textDecoration: "none" }}>
               <Btn t={t} variant="secondary" size="md" icon={Ic.Upload}>
                 Import from doc

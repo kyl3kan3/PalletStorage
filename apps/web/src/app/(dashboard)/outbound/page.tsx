@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tabs, Tag, type TabItem } from "~/components/kit";
@@ -41,11 +42,18 @@ export default function OutboundListPage() {
         title="Outbound"
         subtitle="Customer orders — pick, pack, and ship."
         right={
-          <Link href="/outbound/new" style={{ textDecoration: "none" }}>
-            <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
-              New order
-            </Btn>
-          </Link>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Link href={"/schedule/new" as Route} style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="secondary" size="md" icon={Ic.Calendar}>
+                Schedule pickup
+              </Btn>
+            </Link>
+            <Link href="/outbound/new" style={{ textDecoration: "none" }}>
+              <Btn t={t} variant="accent" size="md" icon={Ic.Plus}>
+                New order
+              </Btn>
+            </Link>
+          </div>
         }
       />
 

@@ -23,12 +23,12 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Home", icon: Ic.Home },
-  { href: "/tasks", label: "My tasks", icon: Ic.Check },
+  { href: "/", label: "Today", icon: Ic.Home },
+  { href: "/schedule" as Route, label: "Schedule", icon: Ic.Calendar },
   { href: "/inbound", label: "Inbound", icon: Ic.Inbound },
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
   { href: "/inventory", label: "Inventory", icon: Ic.Scan },
-  { href: "/catalog", label: "Catalog", icon: Ic.Boxes },
+  { href: "/customers", label: "Customers", icon: Ic.User },
   { href: "/reports", label: "Reports", icon: Ic.Chart },
 ];
 

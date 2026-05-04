@@ -56,6 +56,14 @@ export const cycleCountStatus = pgEnum("cycle_count_status", [
   "cancelled",
 ]);
 export const qtyUnit = pgEnum("qty_unit", ["each", "case", "pallet"]);
+export const appointmentType = pgEnum("appointment_type", ["inbound", "outbound"]);
+export const appointmentStatus = pgEnum("appointment_status", [
+  "scheduled",
+  "at_dock",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
 
 // ──────────────────────────────────────────────────────────────────────
 // Tenancy
@@ -420,6 +428,13 @@ export const outboundOrders = pgTable(
     // The free-text `customer` column stays for consignee display
     // on BOLs and older orders.
     customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    // Mirror of inboundOrders.receivingLocationId — the dock door the
+    // outbound truck loaded at. Set when the appointment is marked at
+    // the dock; nullable for older orders.
+    shippingLocationId: uuid("shipping_location_id").references(
+      () => locations.id,
+      { onDelete: "set null" },
+    ),
     status: outboundStatus("status").notNull().default("draft"),
     shipBy: timestamp("ship_by", { withTimezone: true }),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
@@ -678,6 +693,62 @@ export const quickbooksWebhookEvents = pgTable(
     orgIdx: index("qb_wh_org_idx").on(t.organizationId, t.receivedAt),
     realmIdx: index("qb_wh_realm_idx").on(t.realmId, t.receivedAt),
     entityIdx: index("qb_wh_entity_idx").on(t.realmId, t.entityName, t.entityId),
+  }),
+);
+
+// ──────────────────────────────────────────────────────────────────────
+// Dock scheduling — trucks call to schedule, we assign a door on
+// arrival, and link to the inbound / outbound order being worked.
+// ──────────────────────────────────────────────────────────────────────
+export const dockAppointments = pgTable(
+  "dock_appointments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id),
+    type: appointmentType("type").notNull(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    carrier: text("carrier"),
+    driverName: text("driver_name"),
+    driverPhone: text("driver_phone"),
+    reference: text("reference"),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, {
+      onDelete: "set null",
+    }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    inboundOrderId: uuid("inbound_order_id").references(() => inboundOrders.id, {
+      onDelete: "set null",
+    }),
+    outboundOrderId: uuid("outbound_order_id").references(
+      () => outboundOrders.id,
+      { onDelete: "set null" },
+    ),
+    dockLocationId: uuid("dock_location_id").references(() => locations.id, {
+      onDelete: "set null",
+    }),
+    status: appointmentStatus("status").notNull().default("scheduled"),
+    notes: text("notes"),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    orgScheduledIdx: index("dock_appts_org_scheduled_idx").on(
+      t.organizationId,
+      t.scheduledAt,
+    ),
+    orgStatusIdx: index("dock_appts_org_status_idx").on(
+      t.organizationId,
+      t.status,
+    ),
   }),
 );
 
