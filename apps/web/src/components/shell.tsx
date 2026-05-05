@@ -30,6 +30,7 @@ const NAV: NavItem[] = [
   { href: "/inventory", label: "Inventory", icon: Ic.Scan },
   { href: "/customers", label: "Customers", icon: Ic.User },
   { href: "/reports", label: "Reports", icon: Ic.Chart },
+  { href: "/catalog", label: "Setup", icon: Ic.Settings },
 ];
 
 function activeHref(pathname: string): string | null {

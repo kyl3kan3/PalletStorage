@@ -16,9 +16,9 @@ export default function CatalogPage() {
   return (
     <div>
       <PageTitle
-        eyebrow="Your reference data"
-        title="Catalog"
-        subtitle="The directories behind every order and pallet. Change these once; they show up everywhere."
+        eyebrow="Configuration"
+        title="Setup"
+        subtitle="Reference data behind every order and pallet — products, customers, suppliers, and warehouse layouts. Change these once; they show up everywhere."
       />
 
       <div
