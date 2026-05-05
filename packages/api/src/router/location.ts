@@ -238,6 +238,20 @@ export const locationRouter = router({
               startY: z.number().min(0).max(1).nullable().optional(),
               endX: z.number().min(0).max(1).nullable().optional(),
               endY: z.number().min(0).max(1).nullable().optional(),
+              // Optional intermediate waypoints. When the aisle isn't
+              // straight (L-shaped, dog-leg, curving around an
+              // obstruction), the operator drops one or more
+              // waypoints between start and end and bays distribute
+              // evenly along the resulting polyline by arc length.
+              waypoints: z
+                .array(
+                  z.object({
+                    x: z.number().min(0).max(1),
+                    y: z.number().min(0).max(1),
+                  }),
+                )
+                .max(20)
+                .optional(),
               reverseBayNumbers: z.boolean().optional(),
             }),
           )
@@ -254,6 +268,53 @@ export const locationRouter = router({
           aisle.startY != null &&
           aisle.endX != null &&
           aisle.endY != null;
+
+        // Build the polyline: start → waypoints → end. Then compute
+        // segment lengths so we can place bays by arc-length so they
+        // stay evenly spaced even on an L-shaped aisle.
+        let polyline: Array<{ x: number; y: number }> = [];
+        let cumLen: number[] = [];
+        let totalLen = 0;
+        if (hasPins) {
+          polyline = [
+            { x: aisle.startX!, y: aisle.startY! },
+            ...(aisle.waypoints ?? []),
+            { x: aisle.endX!, y: aisle.endY! },
+          ];
+          cumLen = [0];
+          for (let i = 1; i < polyline.length; i++) {
+            const dx = polyline[i]!.x - polyline[i - 1]!.x;
+            const dy = polyline[i]!.y - polyline[i - 1]!.y;
+            const seg = Math.hypot(dx, dy);
+            totalLen += seg;
+            cumLen.push(totalLen);
+          }
+        }
+        const pointAtT = (
+          tFrac: number,
+        ): { x: number; y: number } => {
+          // tFrac is 0..1 along the whole polyline by arc length.
+          if (polyline.length === 0)
+            return { x: 0, y: 0 };
+          if (polyline.length === 1 || totalLen === 0)
+            return { x: polyline[0]!.x, y: polyline[0]!.y };
+          const target = tFrac * totalLen;
+          // Find the segment whose cumulative range contains target.
+          for (let i = 1; i < polyline.length; i++) {
+            if (target <= cumLen[i]!) {
+              const segLen = cumLen[i]! - cumLen[i - 1]!;
+              const localT = segLen === 0 ? 0 : (target - cumLen[i - 1]!) / segLen;
+              const p0 = polyline[i - 1]!;
+              const p1 = polyline[i]!;
+              return {
+                x: p0.x + (p1.x - p0.x) * localT,
+                y: p0.y + (p1.y - p0.y) * localT,
+              };
+            }
+          }
+          return { x: polyline[polyline.length - 1]!.x, y: polyline[polyline.length - 1]!.y };
+        };
+
         for (let b = 1; b <= aisle.bayCount; b++) {
           let mx: string | undefined;
           let my: string | undefined;
@@ -261,10 +322,9 @@ export const locationRouter = router({
             const tRaw =
               aisle.bayCount === 1 ? 0 : (b - 1) / (aisle.bayCount - 1);
             const t = aisle.reverseBayNumbers ? 1 - tRaw : tRaw;
-            const x = aisle.startX! + (aisle.endX! - aisle.startX!) * t;
-            const y = aisle.startY! + (aisle.endY! - aisle.startY!) * t;
-            mx = x.toString();
-            my = y.toString();
+            const p = pointAtT(t);
+            mx = p.x.toString();
+            my = p.y.toString();
           }
           for (let level = 1; level <= aisle.levelsPerBay; level++) {
             for (let pos = 1; pos <= aisle.positionsPerLevel; pos++) {

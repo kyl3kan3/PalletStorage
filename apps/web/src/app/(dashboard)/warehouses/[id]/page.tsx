@@ -58,13 +58,14 @@ export default function WarehouseDetailPage({
   });
 
   // What the next map click captures. Null = clicks are ignored.
-  // Location pinning (existing flow), aisle endpoint pinning (layout
-  // flow), and the new per-region "detect this aisle" rectangle pick
-  // all multiplex through the same canvas + onPlace handler.
+  // Location pinning (existing flow), aisle endpoint pinning, the
+  // per-region "detect this aisle" rectangle pick, and aisle waypoint
+  // additions all multiplex through the same canvas + onPlace handler.
   type ActiveCapture =
     | { kind: "location"; id: string }
     | { kind: "aisle-start"; idx: number }
     | { kind: "aisle-end"; idx: number }
+    | { kind: "aisle-waypoint"; idx: number }
     | { kind: "region-start"; idx: number }
     | { kind: "region-end"; idx: number; startX: number; startY: number }
     | null;
@@ -79,6 +80,10 @@ export default function WarehouseDetailPage({
     startY: number | null;
     endX: number | null;
     endY: number | null;
+    // Optional intermediate waypoints between start and end. Used for
+    // L-shaped or jogged aisles — bays distribute evenly along the
+    // resulting polyline by arc length, not in a straight line.
+    waypoints: Array<{ x: number; y: number }>;
     reverseBayNumbers: boolean;
   };
   const [aisles, setAisles] = useState<AisleDraft[]>([
@@ -91,6 +96,7 @@ export default function WarehouseDetailPage({
       startY: null,
       endX: null,
       endY: null,
+      waypoints: [],
       reverseBayNumbers: false,
     },
   ]);
@@ -167,15 +173,56 @@ export default function WarehouseDetailPage({
     for (const a of aisles) {
       if (a.startX === null || a.startY === null) continue;
       out.push({ x: a.startX, y: a.startY, label: `${a.letter} start`, tone: "start" });
+      // Show waypoints as plain preview dots so the user can see the
+      // polyline they've built up.
+      for (let i = 0; i < a.waypoints.length; i++) {
+        const w = a.waypoints[i]!;
+        out.push({
+          x: w.x,
+          y: w.y,
+          label: `${a.letter} bend ${i + 1}`,
+          tone: "preview",
+        });
+      }
       if (a.endX !== null && a.endY !== null) {
         out.push({ x: a.endX, y: a.endY, label: `${a.letter} end`, tone: "end" });
+        // Distribute bays along the polyline by arc length so the
+        // preview matches what the server will generate.
+        const polyline = [
+          { x: a.startX, y: a.startY },
+          ...a.waypoints,
+          { x: a.endX, y: a.endY },
+        ];
+        const cum: number[] = [0];
+        let totalLen = 0;
+        for (let i = 1; i < polyline.length; i++) {
+          totalLen += Math.hypot(
+            polyline[i]!.x - polyline[i - 1]!.x,
+            polyline[i]!.y - polyline[i - 1]!.y,
+          );
+          cum.push(totalLen);
+        }
+        const pointAt = (tFrac: number): { x: number; y: number } => {
+          if (totalLen === 0) return polyline[0]!;
+          const target = tFrac * totalLen;
+          for (let i = 1; i < polyline.length; i++) {
+            if (target <= cum[i]!) {
+              const seg = cum[i]! - cum[i - 1]!;
+              const localT = seg === 0 ? 0 : (target - cum[i - 1]!) / seg;
+              return {
+                x: polyline[i - 1]!.x + (polyline[i]!.x - polyline[i - 1]!.x) * localT,
+                y: polyline[i - 1]!.y + (polyline[i]!.y - polyline[i - 1]!.y) * localT,
+              };
+            }
+          }
+          return polyline[polyline.length - 1]!;
+        };
         for (let b = 1; b <= a.bayCount; b++) {
           const tRaw = a.bayCount === 1 ? 0 : (b - 1) / (a.bayCount - 1);
           const t = a.reverseBayNumbers ? 1 - tRaw : tRaw;
-          const mx = a.startX + (a.endX - a.startX) * t;
-          const my = a.startY + (a.endY - a.startY) * t;
+          const p = pointAt(t);
           const label = `${a.letter}${String(b).padStart(2, "0")}`;
-          out.push({ x: mx, y: my, label });
+          out.push({ x: p.x, y: p.y, label });
         }
       }
     }
@@ -236,6 +283,7 @@ export default function WarehouseDetailPage({
           startY: null,
           endX: null,
           endY: null,
+          waypoints: [],
           reverseBayNumbers: false,
         },
       ];
@@ -248,14 +296,22 @@ export default function WarehouseDetailPage({
     setAisles((prev) =>
       prev.map((a, i) =>
         i === idx
-          ? { ...a, startX: null, startY: null, endX: null, endY: null }
+          ? {
+              ...a,
+              startX: null,
+              startY: null,
+              endX: null,
+              endY: null,
+              waypoints: [],
+            }
           : a,
       ),
     );
     // If this row was actively pinning, cancel that too.
     if (
       activeCapture?.kind === "aisle-start" ||
-      activeCapture?.kind === "aisle-end"
+      activeCapture?.kind === "aisle-end" ||
+      activeCapture?.kind === "aisle-waypoint"
     ) {
       if (activeCapture.idx === idx) setActiveCapture(null);
     }
@@ -271,7 +327,8 @@ export default function WarehouseDetailPage({
         startY: null,
         endX: null,
         endY: null,
-        reverseBayNumbers: false,
+        waypoints: [],
+      reverseBayNumbers: false,
       },
     ]);
     setActiveCapture(null);
@@ -327,6 +384,18 @@ export default function WarehouseDetailPage({
     if (activeCapture.kind === "aisle-end") {
       updateAisle(activeCapture.idx, { endX: x, endY: y });
       setActiveCapture(null);
+      return;
+    }
+    if (activeCapture.kind === "aisle-waypoint") {
+      const aisle = aisles[activeCapture.idx];
+      if (aisle) {
+        updateAisle(activeCapture.idx, {
+          waypoints: [...aisle.waypoints, { x, y }],
+        });
+      }
+      // Stay in waypoint capture so the user can drop multiple
+      // corners in a row without re-clicking the button. They cancel
+      // by clicking the button again or by switching modes.
       return;
     }
     if (activeCapture.kind === "region-start") {
@@ -589,6 +658,7 @@ export default function WarehouseDetailPage({
               startY,
               endX,
               endY,
+              waypoints: [],
               reverseBayNumbers: false,
             });
           }
@@ -615,6 +685,7 @@ export default function WarehouseDetailPage({
         startY: a.startY,
         endX: a.endX,
         endY: a.endY,
+        waypoints: a.waypoints.length > 0 ? a.waypoints : undefined,
         reverseBayNumbers: a.reverseBayNumbers,
       })),
     });
@@ -1099,7 +1170,7 @@ export default function WarehouseDetailPage({
                     style={{
                       display: "grid",
                       gridTemplateColumns:
-                        "60px 70px 70px 70px 1fr 1fr 130px 28px",
+                        "60px 70px 70px 70px 1fr 1fr 100px 130px 28px",
                       gap: 8,
                       alignItems: "center",
                       padding: "8px 10px",
@@ -1189,6 +1260,37 @@ export default function WarehouseDetailPage({
                         : endSet
                           ? "End ✓"
                           : "Set end"}
+                    </Btn>
+                    <Btn
+                      t={t}
+                      type="button"
+                      size="sm"
+                      variant={
+                        activeCapture?.kind === "aisle-waypoint" &&
+                        activeCapture.idx === idx
+                          ? "accent"
+                          : a.waypoints.length > 0
+                            ? "secondary"
+                            : "ghost"
+                      }
+                      title="Add a corner / bend so the aisle isn't a straight line. Click to enter bend mode, then click each corner on the map. Click again to exit."
+                      onClick={() => {
+                        if (
+                          activeCapture?.kind === "aisle-waypoint" &&
+                          activeCapture.idx === idx
+                        ) {
+                          setActiveCapture(null);
+                        } else {
+                          setActiveCapture({ kind: "aisle-waypoint", idx });
+                        }
+                      }}
+                    >
+                      {activeCapture?.kind === "aisle-waypoint" &&
+                      activeCapture.idx === idx
+                        ? "Click bends…"
+                        : a.waypoints.length > 0
+                          ? `${a.waypoints.length} bend${a.waypoints.length === 1 ? "" : "s"}`
+                          : "+ Bend"}
                     </Btn>
                     <Btn
                       t={t}
