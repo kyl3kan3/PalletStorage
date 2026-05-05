@@ -184,7 +184,10 @@ export default function NewAppointmentPage() {
             />
           </Field>
           {type === "inbound" ? (
-            <Field label="Supplier (sender)">
+            <Field
+              label="Supplier (sender)"
+              hint="Who's putting the freight on the truck — the vendor / shipper / 'from' on the BOL. Pick the company whose name is on the paperwork. Optional: leave blank if you don't know yet, you can fill it in when the truck arrives."
+            >
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
@@ -199,7 +202,10 @@ export default function NewAppointmentPage() {
               </select>
             </Field>
           ) : (
-            <Field label="Customer (3PL client)">
+            <Field
+              label="Customer (3PL client)"
+              hint="The 3PL client whose pallets are being picked up. Optional now — you can fill it in when the truck arrives."
+            >
               <select
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
@@ -214,7 +220,14 @@ export default function NewAppointmentPage() {
               </select>
             </Field>
           )}
-          <Field label={type === "inbound" ? "Link to inbound order" : "Link to outbound order"}>
+          <Field
+            label={type === "inbound" ? "Link to inbound order" : "Link to outbound order"}
+            hint={
+              type === "inbound"
+                ? "Optional. If you've already created the inbound order for this PO/BOL (via /inbound or 'Import from doc'), link it here. When the truck checks in, the door you assign will automatically attach to that order. Leave blank if the truck shows up unannounced — you can create the inbound after the fact."
+                : "Optional. If the customer's outbound order already exists in the system, link it. When you check the truck in, the assigned door propagates to that order so the load-out flow knows where to stage."
+            }
+          >
             <select
               value={linkedOrderId}
               onChange={(e) => setLinkedOrderId(e.target.value)}
@@ -278,10 +291,12 @@ export default function NewAppointmentPage() {
 function Field({
   label,
   required,
+  hint,
   children,
 }: {
   label: string;
   required?: boolean;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -299,6 +314,11 @@ function Field({
         {required && <span style={{ color: theme.coral }}> *</span>}
       </span>
       {children}
+      {hint && (
+        <span style={{ fontSize: 11, color: theme.muted, lineHeight: 1.4 }}>
+          {hint}
+        </span>
+      )}
     </label>
   );
 }
