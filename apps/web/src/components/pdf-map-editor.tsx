@@ -53,8 +53,10 @@ export function PdfMapEditor({
   locations,
   activeLocationId,
   captureMode,
+  drawMode,
   previewPins,
   onPlace,
+  onDraw,
   onPickExisting,
 }: {
   pdfUrl: string;
@@ -64,8 +66,13 @@ export function PdfMapEditor({
    * activeLocationId is set). Use when the page has its own active-
    * pin state machine (e.g. layout setup). */
   captureMode?: boolean;
+  /** When true, mouse drags on the canvas call `onDraw(x1,y1,x2,y2)`
+   * with normalized coords. Replaces the click handler so the user
+   * can swipe across a rack to define an aisle in one gesture. */
+  drawMode?: boolean;
   previewPins?: PreviewPin[];
   onPlace: (x: number, y: number) => void;
+  onDraw?: (x1: number, y1: number, x2: number, y2: number) => void;
   onPickExisting: (id: string) => void;
 }) {
   const t = theme;
@@ -74,8 +81,11 @@ export function PdfMapEditor({
   const [rendered, setRendered] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState<{ w: number; h: number } | null>(null);
+  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
+  const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
 
   const capturing = captureMode ?? !!activeLocationId;
+  const drawing = !!drawMode && !!onDraw;
 
   useEffect(() => {
     let cancelled = false;
@@ -115,13 +125,58 @@ export function PdfMapEditor({
     };
   }, [pdfUrl]);
 
-  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (!capturing || !pageSize || !wrapRef.current) return;
+  function normalizedFrom(e: React.MouseEvent<HTMLDivElement>) {
+    if (!wrapRef.current) return null;
     const rect = wrapRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return;
-    onPlace(x, y);
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return { x, y };
+  }
+
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (drawing) return; // drag handlers below cover this case
+    if (!capturing || !pageSize) return;
+    const p = normalizedFrom(e);
+    if (!p) return;
+    onPlace(p.x, p.y);
+  }
+
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (!drawing || !pageSize) return;
+    const p = normalizedFrom(e);
+    if (!p) return;
+    e.preventDefault();
+    setDrawStart(p);
+    setDrawCurrent(p);
+  }
+  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (!drawing || !drawStart) return;
+    const p = normalizedFrom(e);
+    if (!p) return;
+    setDrawCurrent(p);
+  }
+  function handleMouseUp(e: React.MouseEvent<HTMLDivElement>) {
+    if (!drawing || !drawStart || !onDraw) {
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
+    }
+    const p = normalizedFrom(e) ?? drawCurrent;
+    if (!p) {
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
+    }
+    // Ignore tiny accidental drags so a stray click doesn't create
+    // a zero-length aisle.
+    const dx = p.x - drawStart.x;
+    const dy = p.y - drawStart.y;
+    if (Math.hypot(dx, dy) >= 0.01) {
+      onDraw(drawStart.x, drawStart.y, p.x, p.y);
+    }
+    setDrawStart(null);
+    setDrawCurrent(null);
   }
 
   const pinnedLocations = locations.filter(
@@ -149,6 +204,13 @@ export function PdfMapEditor({
       <div
         ref={wrapRef}
         onClick={handleClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => {
+          setDrawStart(null);
+          setDrawCurrent(null);
+        }}
         style={{
           position: "relative",
           width: "100%",
@@ -156,7 +218,8 @@ export function PdfMapEditor({
           borderRadius: 12,
           overflow: "hidden",
           background: t.surfaceAlt,
-          cursor: capturing ? "crosshair" : "default",
+          cursor: drawing ? "crosshair" : capturing ? "crosshair" : "default",
+          userSelect: drawing ? "none" : undefined,
         }}
       >
         <canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%" }} />
@@ -236,6 +299,45 @@ export function PdfMapEditor({
               </div>
             );
           })}
+        {/* Live drag-to-draw overlay — shows the line the user is
+            currently swiping across the rack. */}
+        {rendered && drawing && drawStart && drawCurrent && (
+          <svg
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+            }}
+          >
+            <line
+              x1={`${drawStart.x * 100}%`}
+              y1={`${drawStart.y * 100}%`}
+              x2={`${drawCurrent.x * 100}%`}
+              y2={`${drawCurrent.y * 100}%`}
+              stroke={t.primaryDeep}
+              strokeWidth={3}
+              strokeLinecap="round"
+            />
+            <circle
+              cx={`${drawStart.x * 100}%`}
+              cy={`${drawStart.y * 100}%`}
+              r={5}
+              fill={t.primaryDeep}
+              stroke={t.ink}
+              strokeWidth={1.5}
+            />
+            <circle
+              cx={`${drawCurrent.x * 100}%`}
+              cy={`${drawCurrent.y * 100}%`}
+              r={5}
+              fill={t.coral}
+              stroke={t.ink}
+              strokeWidth={1.5}
+            />
+          </svg>
+        )}
         {/* Preview pins (layout in progress) */}
         {rendered &&
           (previewPins ?? []).map((pin, i) => {
@@ -294,9 +396,11 @@ export function PdfMapEditor({
           fontFamily: FONTS.sans,
         }}
       >
-        {capturing
-          ? "Click anywhere on the map to drop a pin."
-          : "Select a location below to start pinning, or define the rack layout."}
+        {drawing
+          ? "Click and drag across a rack to define an aisle's start → end in one swipe."
+          : capturing
+            ? "Click anywhere on the map to drop a pin."
+            : "Select a location below to start pinning, or define the rack layout."}
       </div>
     </div>
   );

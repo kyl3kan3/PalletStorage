@@ -59,8 +59,9 @@ export default function WarehouseDetailPage({
 
   // What the next map click captures. Null = clicks are ignored.
   // Location pinning (existing flow), aisle endpoint pinning, the
-  // per-region "detect this aisle" rectangle pick, and aisle waypoint
-  // additions all multiplex through the same canvas + onPlace handler.
+  // per-region "detect this aisle" rectangle pick, aisle waypoint
+  // additions, and the drag-to-draw aisle mode all multiplex through
+  // the same canvas + onPlace / onDraw handlers.
   type ActiveCapture =
     | { kind: "location"; id: string }
     | { kind: "aisle-start"; idx: number }
@@ -68,6 +69,7 @@ export default function WarehouseDetailPage({
     | { kind: "aisle-waypoint"; idx: number }
     | { kind: "region-start"; idx: number }
     | { kind: "region-end"; idx: number; startX: number; startY: number }
+    | { kind: "draw-aisle" }
     | null;
   const [activeCapture, setActiveCapture] = useState<ActiveCapture>(null);
 
@@ -419,6 +421,32 @@ export default function WarehouseDetailPage({
       void detectAisleInRegion(idx, x1, y1, x2, y2);
       return;
     }
+  }
+
+  // Drag-to-draw — one swipe across a rack creates a new aisle row
+  // with the pinned start + end. Stays in draw mode so the operator
+  // can swipe the next aisle without clicking the button again.
+  function handleMapDraw(x1: number, y1: number, x2: number, y2: number) {
+    if (activeCapture?.kind !== "draw-aisle") return;
+    setAisles((prev) => {
+      const nextLetter = nextAisleLetter(prev.map((a) => a.letter));
+      const last = prev[prev.length - 1];
+      return [
+        ...prev,
+        {
+          letter: nextLetter,
+          bayCount: last?.bayCount ?? 10,
+          levelsPerBay: last?.levelsPerBay ?? 4,
+          positionsPerLevel: last?.positionsPerLevel ?? 2,
+          startX: x1,
+          startY: y1,
+          endX: x2,
+          endY: y2,
+          waypoints: [],
+          reverseBayNumbers: false,
+        },
+      ];
+    });
   }
 
   async function detectAisleInRegion(
@@ -1396,6 +1424,32 @@ export default function WarehouseDetailPage({
                 <Btn
                   t={t}
                   type="button"
+                  variant={
+                    activeCapture?.kind === "draw-aisle" ? "accent" : "ghost"
+                  }
+                  size="sm"
+                  icon={Ic.Pin}
+                  disabled={!warehouse.data?.mapPdfUrl}
+                  title={
+                    !warehouse.data?.mapPdfUrl
+                      ? "Upload a floor plan PDF first"
+                      : "Drag across each rack on the map to create aisles in one swipe each. Stays in draw mode until you turn it off."
+                  }
+                  onClick={() =>
+                    setActiveCapture(
+                      activeCapture?.kind === "draw-aisle"
+                        ? null
+                        : { kind: "draw-aisle" },
+                    )
+                  }
+                >
+                  {activeCapture?.kind === "draw-aisle"
+                    ? "Drawing… click to stop"
+                    : "Draw aisle on map"}
+                </Btn>
+                <Btn
+                  t={t}
+                  type="button"
                   variant="ghost"
                   size="sm"
                   disabled={clearAllPins.isPending}
@@ -1668,9 +1722,13 @@ export default function WarehouseDetailPage({
               activeLocationId={
                 activeCapture?.kind === "location" ? activeCapture.id : null
               }
-              captureMode={activeCapture !== null}
+              captureMode={
+                activeCapture !== null && activeCapture.kind !== "draw-aisle"
+              }
+              drawMode={activeCapture?.kind === "draw-aisle"}
               previewPins={previewPins}
               onPlace={handleMapPlace}
+              onDraw={handleMapDraw}
               onPickExisting={(locId) =>
                 setActiveCapture({ kind: "location", id: locId })
               }
