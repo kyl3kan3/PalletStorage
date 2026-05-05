@@ -37,6 +37,9 @@ export default function WarehouseDetailPage({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
   const detect = trpc.location.detectAislesFromMap.useMutation();
+  const detectSingleAisle = trpc.location.detectSingleAisleInRegion.useMutation();
+  const [regionDetecting, setRegionDetecting] = useState(false);
+  const [regionDetectError, setRegionDetectError] = useState<string | null>(null);
   const createLocation = trpc.location.create.useMutation({
     onSuccess: () => utils.location.listByWarehouse.invalidate({ warehouseId: id }),
   });
@@ -55,12 +58,15 @@ export default function WarehouseDetailPage({
   });
 
   // What the next map click captures. Null = clicks are ignored.
-  // Location pinning (existing flow) and aisle endpoint pinning (new
-  // layout flow) multiplex through the same canvas + onPlace handler.
+  // Location pinning (existing flow), aisle endpoint pinning (layout
+  // flow), and the new per-region "detect this aisle" rectangle pick
+  // all multiplex through the same canvas + onPlace handler.
   type ActiveCapture =
     | { kind: "location"; id: string }
     | { kind: "aisle-start"; idx: number }
     | { kind: "aisle-end"; idx: number }
+    | { kind: "region-start"; idx: number }
+    | { kind: "region-end"; idx: number; startX: number; startY: number }
     | null;
   const [activeCapture, setActiveCapture] = useState<ActiveCapture>(null);
 
@@ -179,6 +185,10 @@ export default function WarehouseDetailPage({
   // Per-row diagnosis of what's still missing so the user can see
   // exactly why Generate & place is disabled. Returned as an array
   // of short human strings, one per incomplete aisle.
+  //
+  // Map pins (startX/Y, endX/Y) are NOT required — a row can be
+  // generated without map placement. Pins only matter for the
+  // floor-plan view; the codes are valid either way.
   const layoutIssues: string[] = [];
   for (const a of aisles) {
     const bits: string[] = [];
@@ -186,8 +196,6 @@ export default function WarehouseDetailPage({
     if (!(a.bayCount >= 1)) bits.push("bays");
     if (!(a.levelsPerBay >= 1)) bits.push("levels");
     if (!(a.positionsPerLevel >= 1)) bits.push("positions");
-    if (a.startX === null || a.startY === null) bits.push("start pin");
-    if (a.endX === null || a.endY === null) bits.push("end pin");
     if (bits.length > 0) {
       layoutIssues.push(
         `Aisle ${a.letter || "?"}: needs ${bits.join(", ")}`,
@@ -195,6 +203,16 @@ export default function WarehouseDetailPage({
     }
   }
   const layoutReady = layoutIssues.length === 0 && aisles.length > 0;
+  // How many aisles will land on the map vs stay un-placed. Used to
+  // word the Generate button + warn the user that codes are still
+  // created, just won't render on the floor plan.
+  const aislesWithoutPins = aisles.filter(
+    (a) =>
+      a.startX === null ||
+      a.startY === null ||
+      a.endX === null ||
+      a.endY === null,
+  ).length;
   const layoutTotal = aisles.reduce(
     (n, a) => n + a.bayCount * a.levelsPerBay * a.positionsPerLevel,
     0,
@@ -310,6 +328,122 @@ export default function WarehouseDetailPage({
       updateAisle(activeCapture.idx, { endX: x, endY: y });
       setActiveCapture(null);
       return;
+    }
+    if (activeCapture.kind === "region-start") {
+      // First corner of the per-aisle detection box. Wait for the
+      // second click to define the opposite corner.
+      setActiveCapture({
+        kind: "region-end",
+        idx: activeCapture.idx,
+        startX: x,
+        startY: y,
+      });
+      return;
+    }
+    if (activeCapture.kind === "region-end") {
+      const { idx, startX, startY } = activeCapture;
+      const x1 = Math.min(startX, x);
+      const y1 = Math.min(startY, y);
+      const x2 = Math.max(startX, x);
+      const y2 = Math.max(startY, y);
+      setActiveCapture(null);
+      void detectAisleInRegion(idx, x1, y1, x2, y2);
+      return;
+    }
+  }
+
+  async function detectAisleInRegion(
+    aisleIdx: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ) {
+    if (!warehouse.data?.mapPdfUrl) return;
+    if (x2 - x1 < 0.02 || y2 - y1 < 0.02) {
+      setRegionDetectError("Region too small — drag a bigger box around the aisle.");
+      return;
+    }
+    setRegionDetectError(null);
+    setRegionDetecting(true);
+    try {
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      const doc = await pdfjs.getDocument({ url: warehouse.data.mapPdfUrl }).promise;
+      const page = await doc.getPage(1);
+      // Render the full page first, then crop. Keeps the resolution
+      // around the region high without re-rendering at custom scales.
+      const baseViewport = page.getViewport({ scale: 1 });
+      const targetMax = 1800;
+      const renderScale = Math.min(
+        targetMax / baseViewport.width,
+        targetMax / baseViewport.height,
+      );
+      const viewport = page.getViewport({ scale: renderScale });
+      const fullCanvas = document.createElement("canvas");
+      fullCanvas.width = Math.ceil(viewport.width);
+      fullCanvas.height = Math.ceil(viewport.height);
+      const fullCtx = fullCanvas.getContext("2d");
+      if (!fullCtx) throw new Error("Canvas 2D unavailable");
+      await page.render({
+        canvasContext: fullCtx,
+        viewport,
+        canvas: fullCanvas,
+      }).promise;
+      const cropX = Math.floor(x1 * fullCanvas.width);
+      const cropY = Math.floor(y1 * fullCanvas.height);
+      const cropW = Math.ceil((x2 - x1) * fullCanvas.width);
+      const cropH = Math.ceil((y2 - y1) * fullCanvas.height);
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = cropW;
+      cropCanvas.height = cropH;
+      const cropCtx = cropCanvas.getContext("2d");
+      if (!cropCtx) throw new Error("Canvas 2D unavailable");
+      cropCtx.drawImage(
+        fullCanvas,
+        cropX,
+        cropY,
+        cropW,
+        cropH,
+        0,
+        0,
+        cropW,
+        cropH,
+      );
+      const dataUrl = cropCanvas.toDataURL("image/jpeg", 0.9);
+      const res = await detectSingleAisle.mutateAsync({
+        warehouseId: id,
+        imageDataUrl: dataUrl,
+        userHint:
+          aisles[aisleIdx]?.letter
+            ? `This crop contains aisle ${aisles[aisleIdx]!.letter}.`
+            : undefined,
+      });
+      // Vision returned coords in the crop's 0-1 frame. Map back to
+      // page-level 0-1 so they line up with the rest of the layout.
+      const mapBack = (v: number | undefined, lo: number, hi: number) =>
+        v === undefined ? null : lo + v * (hi - lo);
+      const startX = mapBack(res.startX, x1, x2);
+      const startY = mapBack(res.startY, y1, y2);
+      const endX = mapBack(res.endX, x1, x2);
+      const endY = mapBack(res.endY, y1, y2);
+      updateAisle(aisleIdx, {
+        bayCount:
+          res.bayCount && res.bayCount > 0
+            ? res.bayCount
+            : aisles[aisleIdx]?.bayCount ?? 1,
+        letter: res.letter || aisles[aisleIdx]?.letter || "",
+        startX,
+        startY,
+        endX,
+        endY,
+      });
+    } catch (e) {
+      setRegionDetectError(
+        e instanceof Error ? e.message : "Couldn't detect that region.",
+      );
+    } finally {
+      setRegionDetecting(false);
     }
   }
 
@@ -475,10 +609,12 @@ export default function WarehouseDetailPage({
         bayCount: a.bayCount,
         levelsPerBay: a.levelsPerBay,
         positionsPerLevel: a.positionsPerLevel,
-        startX: a.startX!,
-        startY: a.startY!,
-        endX: a.endX!,
-        endY: a.endY!,
+        // Pins are optional on the server — pass nulls through when
+        // unset rather than forcing a value.
+        startX: a.startX,
+        startY: a.startY,
+        endX: a.endX,
+        endY: a.endY,
         reverseBayNumbers: a.reverseBayNumbers,
       })),
     });
@@ -963,7 +1099,7 @@ export default function WarehouseDetailPage({
                     style={{
                       display: "grid",
                       gridTemplateColumns:
-                        "60px 80px 80px 80px 1fr 1fr 28px",
+                        "60px 70px 70px 70px 1fr 1fr 130px 28px",
                       gap: 8,
                       alignItems: "center",
                       padding: "8px 10px",
@@ -1053,6 +1189,49 @@ export default function WarehouseDetailPage({
                         : endSet
                           ? "End ✓"
                           : "Set end"}
+                    </Btn>
+                    <Btn
+                      t={t}
+                      type="button"
+                      size="sm"
+                      variant={
+                        activeCapture?.kind === "region-start" &&
+                        activeCapture.idx === idx
+                          ? "accent"
+                          : activeCapture?.kind === "region-end" &&
+                              activeCapture.idx === idx
+                            ? "accent"
+                            : "ghost"
+                      }
+                      disabled={
+                        !warehouse.data?.mapPdfUrl ||
+                        (regionDetecting &&
+                          activeCapture?.kind !== "region-start" &&
+                          activeCapture?.kind !== "region-end")
+                      }
+                      title={
+                        !warehouse.data?.mapPdfUrl
+                          ? "Upload a floor plan PDF first"
+                          : "Drag a box around this aisle on the map and the AI fills in bay count + start/end pins."
+                      }
+                      onClick={() =>
+                        setActiveCapture(
+                          activeCapture?.kind === "region-start" ||
+                            activeCapture?.kind === "region-end"
+                            ? null
+                            : { kind: "region-start", idx },
+                        )
+                      }
+                    >
+                      {activeCapture?.kind === "region-start" &&
+                      activeCapture.idx === idx
+                        ? "Click corner 1"
+                        : activeCapture?.kind === "region-end" &&
+                            activeCapture.idx === idx
+                          ? "Click corner 2"
+                          : regionDetecting
+                            ? "…"
+                            : "Detect this aisle"}
                     </Btn>
                     <button
                       type="button"
@@ -1195,11 +1374,25 @@ export default function WarehouseDetailPage({
                 >
                   {bulkLayout.isPending
                     ? "Placing…"
-                    : `Generate & place ${layoutTotal.toLocaleString()}`}
+                    : aislesWithoutPins === aisles.length
+                      ? `Generate ${layoutTotal.toLocaleString()} codes`
+                      : `Generate & place ${layoutTotal.toLocaleString()}`}
                 </Btn>
+                {aislesWithoutPins > 0 && layoutReady && (
+                  <span style={{ fontSize: 12, color: t.muted }}>
+                    {aislesWithoutPins === aisles.length
+                      ? "No map pins set — codes will generate but won't render on the floor plan."
+                      : `${aislesWithoutPins} aisle(s) without map pins — those codes will generate but won't render on the floor plan.`}
+                  </span>
+                )}
                 {bulkLayout.data && (
                   <span style={{ fontSize: 12, color: t.muted }}>
                     Created {bulkLayout.data.inserted}/{bulkLayout.data.requested} new.
+                  </span>
+                )}
+                {regionDetectError && (
+                  <span style={{ fontSize: 12, color: t.coral }}>
+                    {regionDetectError}
                   </span>
                 )}
                 {detect.data && detect.data.aisles.length === 0 && (

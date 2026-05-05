@@ -229,10 +229,15 @@ export const locationRouter = router({
               bayCount: z.number().int().min(1).max(200),
               levelsPerBay: z.number().int().min(1).max(20),
               positionsPerLevel: z.number().int().min(1).max(20),
-              startX: z.number().min(0).max(1),
-              startY: z.number().min(0).max(1),
-              endX: z.number().min(0).max(1),
-              endY: z.number().min(0).max(1),
+              // Map pins are OPTIONAL. With pins, each bay gets a
+              // mapX/mapY interpolated along the start→end line so it
+              // shows up on the floor-plan view. Without pins, the
+              // codes are still generated — the map placement just
+              // stays unset and the operator sees them as a list.
+              startX: z.number().min(0).max(1).nullable().optional(),
+              startY: z.number().min(0).max(1).nullable().optional(),
+              endX: z.number().min(0).max(1).nullable().optional(),
+              endY: z.number().min(0).max(1).nullable().optional(),
               reverseBayNumbers: z.boolean().optional(),
             }),
           )
@@ -244,13 +249,23 @@ export const locationRouter = router({
       const orgId = await requireOrgId(ctx);
       const rows: (typeof schema.locations.$inferInsert)[] = [];
       for (const aisle of input.aisles) {
+        const hasPins =
+          aisle.startX != null &&
+          aisle.startY != null &&
+          aisle.endX != null &&
+          aisle.endY != null;
         for (let b = 1; b <= aisle.bayCount; b++) {
-          // Fraction along the aisle line, 0 at the first bay and 1
-          // at the last. Single-bay aisles pin at the start point.
-          const tRaw = aisle.bayCount === 1 ? 0 : (b - 1) / (aisle.bayCount - 1);
-          const t = aisle.reverseBayNumbers ? 1 - tRaw : tRaw;
-          const mx = aisle.startX + (aisle.endX - aisle.startX) * t;
-          const my = aisle.startY + (aisle.endY - aisle.startY) * t;
+          let mx: string | undefined;
+          let my: string | undefined;
+          if (hasPins) {
+            const tRaw =
+              aisle.bayCount === 1 ? 0 : (b - 1) / (aisle.bayCount - 1);
+            const t = aisle.reverseBayNumbers ? 1 - tRaw : tRaw;
+            const x = aisle.startX! + (aisle.endX! - aisle.startX!) * t;
+            const y = aisle.startY! + (aisle.endY! - aisle.startY!) * t;
+            mx = x.toString();
+            my = y.toString();
+          }
           for (let level = 1; level <= aisle.levelsPerBay; level++) {
             for (let pos = 1; pos <= aisle.positionsPerLevel; pos++) {
               const bb = String(b).padStart(2, "0");
@@ -266,8 +281,8 @@ export const locationRouter = router({
                 bay: b,
                 level,
                 position: pos,
-                mapX: mx.toString(),
-                mapY: my.toString(),
+                mapX: mx,
+                mapY: my,
               });
             }
           }
@@ -394,14 +409,16 @@ export const locationRouter = router({
           ? `The person who uploaded this drawing told you: """${input.userHint.replace(/"/g, "'")}""". Use this as your primary guide.`
           : "",
         vectorBlock,
-        "Identify every rack aisle (a continuous run of pallet racking).",
+        "Identify every rack aisle (a continuous run of pallet racking). Real warehouses are often NOT rectangular — expect L-shapes, mezzanines, irregular bays added later, aisles of different lengths, and aisles oriented at different angles. Each aisle is independent: its bay count, length, and orientation can differ from every other aisle. Do NOT assume uniform sizing; do NOT treat the building outline as the only thing that matters.",
         "STRICT RULES:",
         "1. Use the GEOMETRY block above as ground truth for shape and position — your start/end coords MUST correspond to actual rectangles or lines in that list. Do NOT distribute aisles 'evenly' if the geometry shows them clustered, and do NOT invent rectangles that aren't in the list.",
         "2. The image is for reading labels and disambiguating which shapes are racking vs walls/doors/text — not for guessing geometry.",
-        "3. If you genuinely can't tell which shapes are racks, return {\"aisles\":[],\"notes\":\"<describe the geometry you saw>\"}.",
-        "4. For each aisle return: letter, bayCount (estimated divisions along the run, e.g. via tick marks inside the rectangle or sub-rectangles), startX/Y (center of first bay), endX/Y (center of last bay).",
-        "5. Coord system: (0,0)=top-left, (1,1)=bottom-right.",
-        "6. In `notes`, name the specific rectangles you picked (by their coords) and why — that lets the user verify you read the actual drawing.",
+        "3. Each aisle's start/end pair should follow the LONG axis of that specific rack run, even if other aisles run perpendicular. Don't force every aisle into the same orientation.",
+        "4. Return aisles individually. Bay counts can vary widely between aisles (some may have 5 bays, others 30); use the visible geometry to estimate each one separately rather than averaging.",
+        "5. If you genuinely can't tell which shapes are racks, return {\"aisles\":[],\"notes\":\"<describe the geometry you saw>\"}.",
+        "6. For each aisle return: letter, bayCount (estimated divisions along the run — count tick marks, sub-rectangles, or use length-÷-typical-bay-width if those are absent), startX/Y (center of first bay), endX/Y (center of last bay).",
+        "7. Coord system: (0,0)=top-left, (1,1)=bottom-right.",
+        "8. In `notes`, name the specific rectangles you picked (by their coords) and why — that lets the user verify you read the actual drawing. Also mention any sections you couldn't classify.",
         'Return minified JSON: {"aisles":[{"letter":"A","bayCount":20,"startX":0.10,"startY":0.30,"endX":0.90,"endY":0.30}],"notes":"..."}.',
         "No prose, no markdown, no code fences — just the JSON.",
       ]
@@ -490,6 +507,146 @@ export const locationRouter = router({
         aisles = parseAislesFromText(content);
       }
       return { aisles, notes };
+    }),
+
+  /**
+   * Per-aisle detection. The user crops a region around ONE aisle on
+   * the floor plan and sends just that crop. Vision answers a much
+   * narrower question — "how many bays are in THIS rack run" — which
+   * is far more reliable than asking it to map the whole non-uniform
+   * warehouse in a single call. Returns a single aisle with bay count
+   * and start/end coords IN THE CROP'S 0-1 frame; the client maps
+   * those back into full-page coordinates using the crop bounds.
+   */
+  detectSingleAisleInRegion: managerProcedure
+    .input(
+      z.object({
+        warehouseId: z.string().uuid(),
+        imageDataUrl: z
+          .string()
+          .regex(/^data:image\/(png|jpeg);base64,/, "Expected a PNG/JPEG data URL"),
+        userHint: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "OPENAI_API_KEY not set on the server.",
+        });
+      }
+      const [wh] = await ctx.db
+        .select({ id: schema.warehouses.id })
+        .from(schema.warehouses)
+        .where(
+          and(
+            eq(schema.warehouses.id, input.warehouseId),
+            eq(schema.warehouses.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!wh) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
+      }
+
+      const prompt = [
+        "You are looking at a CROPPED region of a warehouse floor plan that contains exactly ONE rack aisle (a continuous run of pallet racking).",
+        input.userHint
+          ? `Hint from the user: """${input.userHint.replace(/"/g, "'")}""". Use this as your primary guide.`
+          : "",
+        "Find the rack run inside this crop and answer:",
+        "  - letter: a single uppercase letter or 1-3 char code identifying the aisle. If the image shows a label (e.g. 'A', 'B12', 'AISLE C'), use it. Otherwise return an empty string and the caller will assign one.",
+        "  - bayCount: how many bays / sub-rectangles are along the rack run. Count tick marks, sub-divisions, or use length-÷-typical-bay-width.",
+        "  - startX, startY: center of the FIRST bay (in this crop's frame, 0-1).",
+        "  - endX, endY: center of the LAST bay (in this crop's frame, 0-1).",
+        "Coord system in your response: (0,0)=top-left of THIS CROP, (1,1)=bottom-right of THIS CROP. Do not return coords outside [0,1].",
+        "If there is no rack run in the image, return {\"letter\":\"\",\"bayCount\":0,\"startX\":0,\"startY\":0,\"endX\":0,\"endY\":0,\"notes\":\"<what you saw>\"}.",
+        'Return minified JSON: {"letter":"A","bayCount":12,"startX":0.05,"startY":0.5,"endX":0.95,"endY":0.5,"notes":"..."}.',
+        "No prose, no markdown, no code fences — just the JSON.",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                {
+                  type: "image_url",
+                  image_url: { url: input.imageDataUrl, detail: "high" },
+                },
+              ],
+            },
+          ],
+          max_tokens: 300,
+          temperature: 0,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: `OpenAI returned ${res.status}: ${body.slice(0, 500)}`,
+        });
+      }
+      const payload = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = payload.choices?.[0]?.message?.content ?? "";
+      const clamp = (v: unknown): number | undefined => {
+        if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+        return Math.max(0, Math.min(1, v));
+      };
+      try {
+        const parsed = JSON.parse(content) as {
+          letter?: unknown;
+          bayCount?: unknown;
+          startX?: unknown;
+          startY?: unknown;
+          endX?: unknown;
+          endY?: unknown;
+          notes?: unknown;
+        };
+        const letter =
+          typeof parsed.letter === "string"
+            ? parsed.letter.trim().toUpperCase().slice(0, 3)
+            : "";
+        const bayCount =
+          typeof parsed.bayCount === "number" && Number.isFinite(parsed.bayCount)
+            ? Math.max(0, Math.round(parsed.bayCount))
+            : 0;
+        return {
+          letter,
+          bayCount,
+          startX: clamp(parsed.startX),
+          startY: clamp(parsed.startY),
+          endX: clamp(parsed.endX),
+          endY: clamp(parsed.endY),
+          notes: typeof parsed.notes === "string" ? parsed.notes.slice(0, 500) : "",
+        };
+      } catch {
+        return {
+          letter: "",
+          bayCount: 0,
+          startX: undefined,
+          startY: undefined,
+          endX: undefined,
+          endY: undefined,
+          notes: "Couldn't parse AI response.",
+        };
+      }
     }),
 
   /**
