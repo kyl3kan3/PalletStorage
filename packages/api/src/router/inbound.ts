@@ -328,12 +328,17 @@ export const inboundRouter = router({
           .limit(1);
         if (!line) throw new Error("Line not found");
 
-        // Look up the inbound order's customer so we can backfill it
-        // onto the pallet. Without this, the per-customer billing
-        // report sees no activity even when the order is bound to a
-        // 3PL client.
+        // Look up the inbound order's customer + receiving dock so we
+        // can backfill them onto the pallet. The receivingLocationId is
+        // where the pallet physically lands at receive — without setting
+        // it, the pallet shows location "—" until someone manually
+        // putaways, and the movement ledger has no record of the dock
+        // landing.
         const [order] = await tx
-          .select({ customerId: schema.inboundOrders.customerId })
+          .select({
+            customerId: schema.inboundOrders.customerId,
+            receivingLocationId: schema.inboundOrders.receivingLocationId,
+          })
           .from(schema.inboundOrders)
           .where(eq(schema.inboundOrders.id, line.inboundOrderId))
           .limit(1);
@@ -343,6 +348,7 @@ export const inboundRouter = router({
           palletId: input.palletId,
           productId: line.productId,
           qty: input.qty,
+          qtyUnit: line.qtyUnit,
           lot: input.lot,
           expiry: input.expiry,
         });
@@ -370,15 +376,26 @@ export const inboundRouter = router({
           .set({ qtyReceived: line.qtyReceived + input.qty })
           .where(eq(schema.inboundLines.id, line.id));
 
+        // Set pallet status='received' AND land it at the receiving
+        // dock. currentLocationId only gets the dock when the order
+        // actually has a receiving location set; otherwise the pallet
+        // stays at null and the dashboard's "awaiting putaway" KPI
+        // catches it.
         await tx
           .update(schema.pallets)
-          .set({ status: "received" })
+          .set({
+            status: "received",
+            ...(order?.receivingLocationId
+              ? { currentLocationId: order.receivingLocationId }
+              : {}),
+          })
           .where(and(eq(schema.pallets.id, input.palletId), eq(schema.pallets.organizationId, orgId)));
 
         await tx.insert(schema.movements).values({
           organizationId: orgId,
           palletId: input.palletId,
-          toLocationId: null,
+          fromLocationId: null,
+          toLocationId: order?.receivingLocationId ?? null,
           reason: "receive",
           refType: "inbound_order",
           refId: line.inboundOrderId,
