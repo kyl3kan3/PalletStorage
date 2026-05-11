@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
@@ -21,24 +21,47 @@ interface Line {
 export default function NewInboundPage() {
   const t = theme;
   const router = useRouter();
+  const sp = useSearchParams();
   const utils = trpc.useUtils();
   const warehouses = trpc.warehouse.list.useQuery();
   const products = trpc.product.search.useQuery({ q: "", limit: 100 });
   const customers = trpc.customer.search.useQuery({ q: "", limit: 100 });
+
+  // When this page is opened from a truck appointment, the schedule
+  // page passes ?appointmentId= along so we can attach the new inbound
+  // back to the truck after create. Other URL params seed the form so
+  // the user doesn't have to retype what the truck already knows.
+  const appointmentId = sp.get("appointmentId") ?? "";
+  const linkAppointment = trpc.appointment.update.useMutation();
   const create = trpc.inbound.create.useMutation({
-    onSuccess: (order) => {
+    onSuccess: async (order) => {
       utils.inbound.list.invalidate();
+      if (appointmentId && order) {
+        try {
+          await linkAppointment.mutateAsync({
+            id: appointmentId,
+            inboundOrderId: order.id,
+          });
+          utils.appointment.byId.invalidate({ id: appointmentId });
+        } catch {
+          // Attach failures don't block navigating to the new order —
+          // the user can re-attach from /schedule/[id] if needed.
+        }
+      }
       router.push(`/inbound/${order!.id}`);
     },
   });
 
-  const [warehouseId, setWarehouseId] = useState<string>("");
-  const [reference, setReference] = useState("");
-  const [customerId, setCustomerId] = useState<string>("");
+  const [warehouseId, setWarehouseId] = useState<string>(sp.get("warehouseId") ?? "");
+  const [reference, setReference] = useState(sp.get("reference") ?? "");
+  const [customerId, setCustomerId] = useState<string>(sp.get("customerId") ?? "");
   const [receivingLocationId, setReceivingLocationId] = useState<string>("");
-  const [expectedAt, setExpectedAt] = useState<string>("");
+  const [expectedAt, setExpectedAt] = useState<string>(sp.get("expectedAt") ?? "");
   const [lines, setLines] = useState<Line[]>([]);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Auto-open "More details" when any of its fields are prefilled.
+  const [showAdvanced, setShowAdvanced] = useState(
+    !!sp.get("customerId") || !!sp.get("expectedAt"),
+  );
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [newProductRow, setNewProductRow] = useState<number | null>(null);
 
@@ -64,13 +87,13 @@ export default function NewInboundPage() {
     }
     setLines((prev) => [
       ...prev,
-      { productId: firstProductId, qtyExpected: 1, qtyUnit: "each" },
+      { productId: firstProductId, qtyExpected: 1, qtyUnit: "pallet" },
     ]);
   }
   function onProductCreated(id: string) {
     if (newProductRow === null) return;
     if (newProductRow === -1) {
-      setLines((prev) => [...prev, { productId: id, qtyExpected: 1, qtyUnit: "each" }]);
+      setLines((prev) => [...prev, { productId: id, qtyExpected: 1, qtyUnit: "pallet" }]);
     } else {
       const row = newProductRow;
       setLines((prev) => prev.map((l, j) => (j === row ? { ...l, productId: id } : l)));
