@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
 import { router, tenantProcedure } from "../trpc";
@@ -62,6 +62,94 @@ export const palletRouter = router({
         palletId: row!.id,
       });
       return row;
+    }),
+
+  /**
+   * Operator worklist of pallets needing putaway. The Tasks page shows
+   * this as a sibling section to pick lanes — pallets at the dock
+   * (status='received') plus any in-transit pallets that already have
+   * a location set. Per row includes the current location code so the
+   * operator knows which dock door to walk to, plus a suggested rack
+   * (first available rack in the same warehouse — placeholder for a
+   * smarter velocity/customer-zone strategy later).
+   */
+  putawayQueue: tenantProcedure
+    .input(z.object({ warehouseId: z.string().uuid().optional() }).default({}))
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const rows = await ctx.db
+        .select({
+          palletId: schema.pallets.id,
+          lpn: schema.pallets.lpn,
+          status: schema.pallets.status,
+          warehouseId: schema.pallets.warehouseId,
+          warehouseCode: schema.warehouses.code,
+          currentLocationId: schema.pallets.currentLocationId,
+          locationCode: schema.locations.code,
+          customerId: schema.pallets.customerId,
+          customerName: schema.customers.name,
+          createdAt: schema.pallets.createdAt,
+        })
+        .from(schema.pallets)
+        .leftJoin(
+          schema.locations,
+          eq(schema.locations.id, schema.pallets.currentLocationId),
+        )
+        .leftJoin(
+          schema.warehouses,
+          eq(schema.warehouses.id, schema.pallets.warehouseId),
+        )
+        .leftJoin(
+          schema.customers,
+          eq(schema.customers.id, schema.pallets.customerId),
+        )
+        .where(
+          and(
+            eq(schema.pallets.organizationId, orgId),
+            or(
+              eq(schema.pallets.status, "received"),
+              eq(schema.pallets.status, "in_transit"),
+            ),
+            input.warehouseId
+              ? eq(schema.pallets.warehouseId, input.warehouseId)
+              : undefined,
+          ),
+        )
+        .orderBy(asc(schema.pallets.createdAt));
+
+      if (rows.length === 0) return [];
+
+      // Suggested rack: first available rack in each pallet's warehouse,
+      // sorted by code. Cheap "first rack" placeholder — directed
+      // putaway with velocity / customer-zone rules is a later layer.
+      const warehouseIds = Array.from(new Set(rows.map((r) => r.warehouseId)));
+      const racks = await ctx.db
+        .select({
+          id: schema.locations.id,
+          code: schema.locations.code,
+          warehouseId: schema.locations.warehouseId,
+        })
+        .from(schema.locations)
+        .where(
+          and(
+            eq(schema.locations.organizationId, orgId),
+            eq(schema.locations.type, "rack"),
+            inArray(schema.locations.warehouseId, warehouseIds),
+          ),
+        )
+        .orderBy(asc(schema.locations.code));
+
+      const suggestedByWarehouse = new Map<string, { id: string; code: string }>();
+      for (const r of racks) {
+        if (!suggestedByWarehouse.has(r.warehouseId)) {
+          suggestedByWarehouse.set(r.warehouseId, { id: r.id, code: r.code });
+        }
+      }
+
+      return rows.map((r) => ({
+        ...r,
+        suggestedRack: suggestedByWarehouse.get(r.warehouseId) ?? null,
+      }));
     }),
 
   move: tenantProcedure
