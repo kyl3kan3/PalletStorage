@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, SquircleIcon, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { PalletStatusBadge } from "~/components/status-badge";
 
 /**
  * Task inbox — a single place an operator can see what's been assigned
@@ -42,6 +44,10 @@ export default function TasksPage() {
       />
 
       <MineSection t={t} mine={mine.data} />
+
+      <div style={{ marginTop: 28 }}>
+        <PutawaySection t={t} />
+      </div>
 
       {isManager && (
         <div style={{ marginTop: 28 }}>
@@ -198,6 +204,208 @@ function MineSection({
             ))}
           </Card>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pallets on the dock awaiting putaway. Visible to everyone — putaway
+ * is operator work but managers benefit from seeing the queue depth.
+ * Each row gets a suggested rack (cheap "first available rack in
+ * warehouse" placeholder) with a Put-away button that calls
+ * pallet.move with reason='putaway'.
+ */
+function PutawaySection({ t }: { t: typeof theme }) {
+  const utils = trpc.useUtils();
+  const queue = trpc.pallet.putawayQueue.useQuery();
+  const move = trpc.pallet.move.useMutation({
+    onSuccess: () => {
+      utils.pallet.putawayQueue.invalidate();
+    },
+  });
+  // Per-row rack override — defaults to the suggested rack but the
+  // operator can pick a different one before tapping Put away.
+  const [rackChoice, setRackChoice] = useState<Record<string, string>>({});
+  // List of racks in each warehouse, fetched on-demand so the dropdown
+  // shows alternatives to the suggested first-available. Keyed by
+  // warehouseId; only fetched when the user pops the dropdown open.
+  const [openWarehouse, setOpenWarehouse] = useState<string | null>(null);
+  const altRacks = trpc.location.listByWarehouse.useQuery(
+    { warehouseId: openWarehouse ?? "" },
+    { enabled: !!openWarehouse },
+  );
+
+  const rows = queue.data ?? [];
+
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11,
+          color: t.muted,
+          textTransform: "uppercase",
+          letterSpacing: 0.6,
+          fontWeight: 600,
+          marginBottom: 8,
+        }}
+      >
+        Putaway{" "}
+        {rows.length > 0 && (
+          <span style={{ color: t.primaryDeep }}>· {rows.length}</span>
+        )}
+      </div>
+
+      {rows.length === 0 ? (
+        <Card t={t} tint="alt">
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <SquircleIcon t={t} icon={Ic.Check} tint="mint" size={44} />
+            <div style={{ fontSize: 14, color: t.muted }}>
+              Nothing on the dock. Pallets land here after receive — put
+              them away from this list.
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <Card t={t} padding={0}>
+          <Header t={t} title="On the dock — waiting for putaway">
+            <Ic.Inbound size={16} color={t.muted} />
+          </Header>
+          <HeaderRow t={t}>
+            <div style={{ width: 130 }}>LPN</div>
+            <div style={{ flex: 1, minWidth: 0 }}>Customer / warehouse</div>
+            <div style={{ width: 110 }}>Status</div>
+            <div style={{ width: 130 }}>At</div>
+            <div style={{ width: 260 }}>Put away to…</div>
+          </HeaderRow>
+          {rows.map((r) => {
+            const racks =
+              openWarehouse === r.warehouseId
+                ? (altRacks.data ?? []).filter((l) => l.type === "rack")
+                : r.suggestedRack
+                  ? [r.suggestedRack]
+                  : [];
+            const choice =
+              rackChoice[r.palletId] ?? r.suggestedRack?.id ?? "";
+            return (
+              <div
+                key={r.palletId}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  padding: "12px 20px",
+                  alignItems: "center",
+                  borderTop: `1.5px dashed ${t.border}`,
+                }}
+              >
+                <span
+                  style={{
+                    width: 130,
+                    fontFamily: FONTS.mono,
+                    fontSize: 12,
+                    color: t.ink,
+                  }}
+                >
+                  {r.lpn}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: t.ink,
+                      fontWeight: 600,
+                      fontSize: 13,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.customerName ?? "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted }}>
+                    {r.warehouseCode ?? r.warehouseId.slice(0, 8)}
+                  </div>
+                </div>
+                <span style={{ width: 110 }}>
+                  <PalletStatusBadge status={r.status} t={t} />
+                </span>
+                <span
+                  style={{
+                    width: 130,
+                    fontFamily: FONTS.mono,
+                    fontSize: 12,
+                    color: t.muted,
+                  }}
+                >
+                  {r.locationCode ?? "—"}
+                </span>
+                <div style={{ width: 260, display: "flex", gap: 6 }}>
+                  <select
+                    value={choice}
+                    onFocus={() => setOpenWarehouse(r.warehouseId)}
+                    onChange={(e) =>
+                      setRackChoice((prev) => ({
+                        ...prev,
+                        [r.palletId]: e.target.value,
+                      }))
+                    }
+                    disabled={!r.suggestedRack && racks.length === 0}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: "7px 10px",
+                      borderRadius: 10,
+                      background: t.surfaceAlt,
+                      border: `1.5px solid ${t.border}`,
+                      fontFamily: FONTS.mono,
+                      fontSize: 12,
+                      color: t.ink,
+                    }}
+                  >
+                    {!r.suggestedRack && racks.length === 0 ? (
+                      <option value="">— no racks —</option>
+                    ) : (
+                      racks.map((rk) => (
+                        <option key={rk.id} value={rk.id}>
+                          {rk.code}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    icon={Ic.Check}
+                    disabled={!choice || move.isPending}
+                    onClick={() =>
+                      move.mutate({
+                        palletId: r.palletId,
+                        toLocationId: choice,
+                        reason: "putaway",
+                      })
+                    }
+                  >
+                    Put away
+                  </Btn>
+                </div>
+              </div>
+            );
+          })}
+          {move.error && (
+            <div
+              style={{
+                padding: "10px 20px",
+                background: t.coralSoft,
+                color: t.coral,
+                fontSize: 12,
+                borderTop: `1.5px dashed ${t.border}`,
+              }}
+            >
+              {move.error.message}
+            </div>
+          )}
+        </Card>
       )}
     </div>
   );
