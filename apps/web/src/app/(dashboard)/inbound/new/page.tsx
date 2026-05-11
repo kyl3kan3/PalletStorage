@@ -174,6 +174,31 @@ export default function NewInboundPage() {
             </Field>
           </div>
 
+          {/* Receiving location lives in essentials when the warehouse has
+              dock or staging locations — it's the most time-critical field
+              when a truck arrives. Hidden on warehouses with no docks
+              configured (and the picker would be empty anyway). */}
+          {receivingCandidates.length > 0 && (
+            <Field label="Receiving location">
+              <Select
+                value={receivingLocationId}
+                onChange={(e) => setReceivingLocationId(e.target.value)}
+                disabled={!warehouseId}
+              >
+                <option value="">— none —</option>
+                {receivingCandidates.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code} ({l.type})
+                  </option>
+                ))}
+              </Select>
+              <HelpText>
+                Which dock door or staging bin the truck is headed to. Pallets default here on
+                receive.
+              </HelpText>
+            </Field>
+          )}
+
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -191,40 +216,20 @@ export default function NewInboundPage() {
               gap: 6,
             }}
           >
-            {showAdvanced ? "▾" : "▸"} More details (customer, dock, date)
+            {showAdvanced ? "▾" : "▸"} More details (customer, expected date)
           </button>
 
           {showAdvanced && (
             <>
-              <div
-                data-collapse-grid
-                style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}
-              >
-                <Field label="Expected on">
-                  <TextField
-                    t={t}
-                    type="date"
-                    value={expectedAt}
-                    onChange={(e) => setExpectedAt(e.target.value)}
-                  />
-                  <HelpText>When you expect the truck to arrive.</HelpText>
-                </Field>
-                <Field label="Receiving location">
-                  <Select
-                    value={receivingLocationId}
-                    onChange={(e) => setReceivingLocationId(e.target.value)}
-                    disabled={!warehouseId}
-                  >
-                    <option value="">— none —</option>
-                    {receivingCandidates.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.code} ({l.type})
-                      </option>
-                    ))}
-                  </Select>
-                  <HelpText>Which dock door or staging bin it&apos;s headed to.</HelpText>
-                </Field>
-              </div>
+              <Field label="Expected on">
+                <TextField
+                  t={t}
+                  type="date"
+                  value={expectedAt}
+                  onChange={(e) => setExpectedAt(e.target.value)}
+                />
+                <HelpText>When you expect the truck to arrive.</HelpText>
+              </Field>
 
               <Field label="Customer (3PL client)">
                 <div style={{ display: "flex", gap: 8 }}>
