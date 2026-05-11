@@ -117,7 +117,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   // "Add line" picker inside edit mode.
   const [addProductId, setAddProductId] = useState("");
   const [addQty, setAddQty] = useState(1);
-  const [addQtyUnit, setAddQtyUnit] = useState<"each" | "case" | "pallet">("each");
+  const [addQtyUnit, setAddQtyUnit] = useState<"each" | "case" | "pallet">("pallet");
 
   // Inline "receive" state — tracks which line is currently being
   // received on, plus the in-flight qty/lot/expiry the user is typing.
@@ -759,7 +759,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                       onSuccess: () => {
                         setAddProductId("");
                         setAddQty(1);
-                        setAddQtyUnit("each");
+                        setAddQtyUnit("pallet");
                       },
                     },
                   )
