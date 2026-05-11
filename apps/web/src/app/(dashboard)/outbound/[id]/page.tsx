@@ -2,14 +2,17 @@
 
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import type { Route } from "next";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
-import { outboundStatusTone } from "~/lib/statusTone";
-import { friendlyOutboundStatus } from "~/lib/friendly";
 import { useIsManager } from "~/lib/useRole";
 import { qtyUnitLabel } from "@wms/core";
+import { Breadcrumbs } from "~/components/breadcrumbs";
+import { OutboundStatusBadge } from "~/components/status-badge";
+import { ReasonPicker, OUTBOUND_CANCEL_REASONS } from "~/components/reason-picker";
 
 export default function OutboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -26,6 +29,12 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
     onSuccess: () => {
       utils.outbound.byId.invalidate({ id });
       utils.outbound.picksForOrder.invalidate({ outboundOrderId: id });
+    },
+  });
+  const changeWarehouse = trpc.outbound.changeWarehouse.useMutation({
+    onSuccess: () => {
+      utils.outbound.byId.invalidate({ id });
+      utils.outbound.checkInventory.invalidate({ outboundOrderId: id });
     },
   });
   const router = useRouter();
@@ -90,14 +99,21 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div>
+      <Breadcrumbs
+        items={[
+          { label: "Home", href: "/" },
+          { label: "Outbound", href: "/outbound" },
+          { label: order?.reference ? `Ref ${order.reference}` : id.slice(0, 8) },
+        ]}
+      />
       <PageTitle
-        eyebrow={order?.reference ? `Ref ${order.reference} · ${order.customer ?? "—"}` : "Outbound"}
-        title={`Outbound ${id.slice(0, 8)}`}
-        right={
-          <Tag t={t} tone={outboundStatusTone(status)}>
-            {friendlyOutboundStatus(status)}
-          </Tag>
+        eyebrow={
+          order?.reference
+            ? `Ref ${order.reference}${order.customer ? ` · Consignee ${order.customer}` : ""}`
+            : "Outbound"
         }
+        title={`Outbound ${id.slice(0, 8)}`}
+        right={<OutboundStatusBadge status={status} t={t} />}
       />
 
       {/* Workflow stepper — every action the order will pass through
@@ -799,32 +815,104 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
                   (d) => d.stored > 0 || d.total > 0,
                 );
                 let advice = "";
+                // Each branch can also yield an inline action that takes
+                // the operator straight to the page that fixes it,
+                // instead of just describing the problem.
+                let action: React.ReactNode = null;
                 if (l.stored >= remaining) {
                   advice = "should be allocatable — try Generate again";
                 } else if (l.stored > 0) {
                   advice = `only ${l.stored} stored, need ${remaining} — receive more`;
                 } else if (l.received > 0) {
                   advice = `${l.received} received but on the dock — put away to a rack first`;
+                  action = (
+                    <Link
+                      href={
+                        `/inventory/stock?status=received&warehouse=${order!.warehouseId}` as Route
+                      }
+                      style={{ textDecoration: "none", marginLeft: 8 }}
+                    >
+                      <Btn t={t} variant="secondary" size="sm" icon={Ic.Check}>
+                        Go put away
+                      </Btn>
+                    </Link>
+                  );
                 } else if (l.inTransit > 0) {
                   advice = `${l.inTransit} in transit, none received yet`;
+                  action = order?.customerId ? (
+                    <Link
+                      href={`/inbound?customerId=${order.customerId}` as Route}
+                      style={{ textDecoration: "none", marginLeft: 8 }}
+                    >
+                      <Btn t={t} variant="secondary" size="sm" icon={Ic.Inbound}>
+                        Open inbound
+                      </Btn>
+                    </Link>
+                  ) : null;
                 } else if (l.elsewhere.length > 0) {
                   advice = `stored in another warehouse (${l.elsewhere.map((e) => `${e.warehouseCode}:${e.total}`).join(", ")}) — order is for a different warehouse`;
+                  // Manager-only: offer to switch the order's warehouse to
+                  // the first elsewhere candidate. Refused server-side once
+                  // picks exist, so safe to expose pre-allocation.
+                  if (isManager && (status === "open" || status === "draft")) {
+                    action = (
+                      <span style={{ marginLeft: 8, display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                        {l.elsewhere.map((e) => (
+                          <Btn
+                            key={e.warehouseId}
+                            t={t}
+                            variant="secondary"
+                            size="sm"
+                            icon={Ic.Settings}
+                            disabled={changeWarehouse.isPending}
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Switch this order's warehouse to ${e.warehouseCode}? You'll need to re-run Generate picks afterwards.`,
+                                )
+                              ) {
+                                changeWarehouse.mutate({
+                                  id,
+                                  warehouseId: e.warehouseId,
+                                });
+                              }
+                            }}
+                          >
+                            Switch to {e.warehouseCode}
+                          </Btn>
+                        ))}
+                      </span>
+                    );
+                  }
                 } else if (duplicateWithStock) {
                   advice = "looks like a duplicate product holds the stock — see details below";
                 } else if (l.duplicates.length > 0) {
                   advice = `no pallets, but ${l.duplicates.length} other product${l.duplicates.length > 1 ? "s" : ""} share this name — see details below`;
                 } else {
                   advice = "no pallets — receive an inbound for this product first";
+                  action = order?.customerId ? (
+                    <Link
+                      href={`/inbound?customerId=${order.customerId}` as Route}
+                      style={{ textDecoration: "none", marginLeft: 8 }}
+                    >
+                      <Btn t={t} variant="secondary" size="sm" icon={Ic.Inbound}>
+                        Open inbound
+                      </Btn>
+                    </Link>
+                  ) : null;
                 }
                 return (
                   <div key={l.productId} style={{ marginTop: 6 }}>
                     <span style={{ fontFamily: FONTS.mono, fontWeight: 600 }}>
                       {l.productSku ? `${l.productSku} — ${l.productName}` : l.productName}
                     </span>
-                    <div style={{ marginLeft: 6 }}>
-                      need {remaining} · stored {l.stored} · received{" "}
-                      {l.received} · in_transit {l.inTransit} —{" "}
-                      <em>{advice}</em>
+                    <div style={{ marginLeft: 6, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+                      <span>
+                        need {remaining} · stored {l.stored} · received{" "}
+                        {l.received} · in_transit {l.inTransit} —{" "}
+                        <em>{advice}</em>
+                      </span>
+                      {action}
                     </div>
                     {l.duplicates.length > 0 && (
                       <div
@@ -926,28 +1014,33 @@ export default function OutboundDetailPage({ params }: { params: Promise<{ id: s
         <div style={{ marginTop: 16 }}>
           <Card t={t}>
             <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Cancel order</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <TextField
+            <div style={{ marginBottom: 10 }}>
+              <ReasonPicker
                 t={t}
-                placeholder="Cancel reason (required)"
+                presets={OUTBOUND_CANCEL_REASONS}
                 value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                style={{ flex: 1 }}
+                onChange={setCancelReason}
+                otherPlaceholder="Tell us why…"
               />
-              <Btn
-                t={t}
-                variant="danger"
-                size="md"
-                icon={Ic.X}
-                disabled={cancelOrder.isPending || !cancelReason.trim()}
-                onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
-              >
-                {cancelOrder.isPending ? "Cancelling…" : "Cancel"}
-              </Btn>
             </div>
+            <Btn
+              t={t}
+              variant="danger"
+              size="md"
+              icon={Ic.X}
+              disabled={cancelOrder.isPending || !cancelReason.trim()}
+              onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
+            >
+              {cancelOrder.isPending ? "Cancelling…" : "Cancel order"}
+            </Btn>
             {cancelOrder.error && (
               <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
                 {cancelOrder.error.message}
+              </div>
+            )}
+            {changeWarehouse.error && (
+              <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
+                {changeWarehouse.error.message}
               </div>
             )}
           </Card>
