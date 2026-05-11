@@ -5,6 +5,7 @@ import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
 import { router, tenantProcedure, managerProcedure, adminProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+import { rateLimit } from "../rateLimit";
 
 // Shared profile schema — used by create + update.
 const profile = z.object({
@@ -307,6 +308,9 @@ export const customerRouter = router({
           imageDataUrl: z
             .string()
             .regex(/^data:image\/(png|jpeg);base64,/)
+            // Cap base64 length at ~8 MB so a single request can't push tens
+            // of MB through the OpenAI vision endpoint (~6 MB binary).
+            .max(8 * 1024 * 1024)
             .optional(),
         })
         .refine(
@@ -426,6 +430,11 @@ export const customerRouter = router({
         });
       }
 
+      // Cap OpenAI calls per org to bound spend even though this procedure
+      // is already manager-gated. 20/min is generous for a human pasting
+      // sheets and well below any abuse profile.
+      rateLimit(`openai:${orgId}`, { max: 20, windowMs: 60_000 });
+
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -445,9 +454,12 @@ export const customerRouter = router({
       });
       if (!res.ok) {
         const body = await res.text();
+        // Log the full upstream response for ops, but don't leak provider
+        // internals or quota details to the client.
+        console.error("[parseInventorySheet] OpenAI error", res.status, body.slice(0, 2000));
         throw new TRPCError({
           code: "BAD_GATEWAY",
-          message: `OpenAI returned ${res.status}: ${body.slice(0, 400)}`,
+          message: "AI provider error",
         });
       }
       const payload = (await res.json()) as {
