@@ -474,3 +474,42 @@ CREATE INDEX IF NOT EXISTS "dock_appts_org_status_idx"
 ALTER TABLE "outbound_orders"
   ADD COLUMN IF NOT EXISTS "shipping_location_id" uuid
     REFERENCES "locations"("id") ON DELETE SET NULL;
+
+-- 0016_audit_log: append-only audit log for sensitive mutations.
+CREATE TABLE IF NOT EXISTS "audit_log" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "organization_id" uuid NOT NULL REFERENCES "organizations"("id") ON DELETE CASCADE,
+  "user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+  "action" text NOT NULL,
+  "entity_type" text NOT NULL,
+  "entity_id" uuid,
+  "metadata" jsonb,
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "audit_log_org_created_idx"
+  ON "audit_log" ("organization_id", "created_at" DESC);
+ALTER TABLE "audit_log" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "audit_log" FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'tenant_isolation' AND tablename = 'audit_log') THEN
+    CREATE POLICY tenant_isolation ON "audit_log"
+      USING (organization_id = current_org_id())
+      WITH CHECK (organization_id = current_org_id());
+  END IF;
+END $$;
+
+-- 0017_pallet_items_qty_unit: carry the line's qty_unit onto each
+-- pallet_items row so 'received 2 cases' stops looking identical to
+-- 'received 2 eaches' downstream.
+ALTER TABLE "pallet_items"
+  ADD COLUMN IF NOT EXISTS "qty_unit" "qty_unit" NOT NULL DEFAULT 'each';
+UPDATE "pallet_items" pi
+SET "qty_unit" = il.qty_unit
+FROM "movements" m
+JOIN "inbound_lines" il ON il.id = m.ref_id
+WHERE m.reason = 'receive'
+  AND m.ref_type = 'inbound_line'
+  AND m.pallet_id = pi.pallet_id
+  AND pi.product_id = il.product_id
+  AND pi.qty_unit = 'each';
+
