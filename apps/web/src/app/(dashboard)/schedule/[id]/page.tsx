@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { trpc } from "~/lib/trpc";
@@ -37,6 +37,7 @@ export default function AppointmentDetailPage({
   const dockOptions = (docks.data ?? []).filter((l) => l.type === "dock");
 
   const [doorChoice, setDoorChoice] = useState<string>("");
+  const [linkChoice, setLinkChoice] = useState<string>("");
 
   const checkIn = trpc.appointment.checkIn.useMutation({
     onSuccess: () => utils.appointment.byId.invalidate({ id }),
@@ -50,6 +51,36 @@ export default function AppointmentDetailPage({
   const cancel = trpc.appointment.cancel.useMutation({
     onSuccess: () => utils.appointment.byId.invalidate({ id }),
   });
+  const link = trpc.appointment.update.useMutation({
+    onSuccess: () => {
+      utils.appointment.byId.invalidate({ id });
+      setLinkChoice("");
+    },
+  });
+
+  // Pull a list of candidate orders to attach when the appointment has
+  // no order yet. Only fetched on-demand (the appointment must exist
+  // and have no linked order). Filtered to the appointment's warehouse
+  // and to non-terminal statuses, since attaching a closed/cancelled
+  // order serves no purpose.
+  const needsLink = !!a && !a.inboundOrderId && !a.outboundOrderId;
+  const inboundCandidates = trpc.inbound.list.useQuery(
+    { warehouseId: a?.warehouseId },
+    { enabled: needsLink && a?.type === "inbound" && !!a.warehouseId },
+  );
+  const outboundCandidates = trpc.outbound.list.useQuery(
+    { warehouseId: a?.warehouseId },
+    { enabled: needsLink && a?.type === "outbound" && !!a.warehouseId },
+  );
+  const candidates = useMemo(() => {
+    const list =
+      a?.type === "inbound"
+        ? inboundCandidates.data ?? []
+        : outboundCandidates.data ?? [];
+    return list.filter(
+      (o) => o.status !== "closed" && o.status !== "cancelled" && o.status !== "shipped",
+    );
+  }, [a?.type, inboundCandidates.data, outboundCandidates.data]);
 
   if (!a) {
     return <div style={{ color: t.muted }}>Loading…</div>;
@@ -151,11 +182,95 @@ export default function AppointmentDetailPage({
               Open outbound order →
             </Link>
           ) : (
-            <div style={{ fontSize: 12.5, color: t.muted }}>
-              No order linked. Edit this appointment to attach one — or just
-              create a new {a.type === "inbound" ? "inbound" : "outbound"} order
-              when the paperwork comes in.
-            </div>
+            <>
+              <div style={{ fontSize: 12.5, color: t.muted, marginBottom: 10 }}>
+                No order linked yet. Attach an existing one, or create a new
+                {a.type === "inbound" ? " inbound" : " outbound"} for this truck.
+              </div>
+              {isManager && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* Attach existing — dropdown of non-terminal orders
+                      for this warehouse. Wire on the truck-arrived-but-
+                      paperwork-already-exists case. */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <select
+                      value={linkChoice}
+                      onChange={(e) => setLinkChoice(e.target.value)}
+                      style={{ ...selectStyle(t), flex: 1, minWidth: 180 }}
+                      disabled={candidates.length === 0}
+                    >
+                      <option value="">
+                        {candidates.length === 0
+                          ? `No open ${a.type} orders in this warehouse`
+                          : `— pick an existing ${a.type} order —`}
+                      </option>
+                      {candidates.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.reference}
+                          {o.status ? ` (${o.status})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <Btn
+                      t={t}
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={Ic.Check}
+                      disabled={!linkChoice || link.isPending}
+                      onClick={() =>
+                        link.mutate(
+                          a.type === "inbound"
+                            ? { id, inboundOrderId: linkChoice }
+                            : { id, outboundOrderId: linkChoice },
+                        )
+                      }
+                    >
+                      {link.isPending ? "Attaching…" : "Attach"}
+                    </Btn>
+                  </div>
+
+                  {/* Create-and-attach — for the truck-arrived-with-paperwork
+                      case. Pre-fills /inbound/new (or /outbound/new) with
+                      what the truck already knows; the new-order page
+                      back-links to this appointment via ?appointmentId. */}
+                  {a.type === "inbound" ? (
+                    <Link
+                      href={
+                        `/inbound/new?appointmentId=${id}&warehouseId=${a.warehouseId}${
+                          a.reference ? `&reference=${encodeURIComponent(a.reference)}` : ""
+                        }${
+                          a.scheduledAt
+                            ? `&expectedAt=${new Date(a.scheduledAt)
+                                .toISOString()
+                                .slice(0, 10)}`
+                            : ""
+                        }` as Route
+                      }
+                      style={{ textDecoration: "none" }}
+                    >
+                      <Btn t={t} type="button" variant="secondary" size="sm" icon={Ic.Plus}>
+                        + Create inbound for this truck
+                      </Btn>
+                    </Link>
+                  ) : (
+                    <Link
+                      href={`/outbound/new?warehouseId=${a.warehouseId}` as Route}
+                      style={{ textDecoration: "none" }}
+                    >
+                      <Btn t={t} type="button" variant="secondary" size="sm" icon={Ic.Plus}>
+                        + Create outbound for this truck
+                      </Btn>
+                    </Link>
+                  )}
+                  {link.error && (
+                    <div style={{ fontSize: 12, color: t.coral }}>
+                      {link.error.message}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </Card>
 
