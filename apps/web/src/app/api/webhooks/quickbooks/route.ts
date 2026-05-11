@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { verifyIntuitSignature } from "@wms/api";
 import { db, schema } from "@wms/db";
 import { eq } from "drizzle-orm";
 
@@ -37,9 +37,7 @@ export async function POST(req: NextRequest) {
 
   // Read as text so we can HMAC the exact bytes Intuit signed.
   const rawBody = await req.text();
-  const expected = createHmac("sha256", token).update(rawBody, "utf8").digest("base64");
-
-  if (!safeEqual(expected, sigHeader)) {
+  if (!verifyIntuitSignature(rawBody, sigHeader, token)) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
@@ -86,14 +84,6 @@ export async function POST(req: NextRequest) {
 
   // Ack quickly. Intuit retries on non-2xx, so don't block on heavy work.
   return NextResponse.json({ received: rows.length });
-}
-
-/** Constant-time string compare to resist signature-timing side channels. */
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
 }
 
 // The payload shape per Intuit's docs as of late 2024. We parse

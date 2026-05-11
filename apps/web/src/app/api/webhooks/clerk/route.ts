@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { Webhook } from "svix";
 import { ensureProvisioned } from "@wms/api";
 import { db, schema } from "@wms/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 /**
  * Clerk → WMS webhook. Verifies the Svix signature (sent by Clerk) and
@@ -97,9 +97,17 @@ export async function POST(req: NextRequest) {
         .where(eq(schema.users.clerkUserId, event.data.public_user_data.user_id))
         .limit(1);
       if (org && user) {
+        // Delete only the membership for THIS user. The previous version
+        // matched on organizationId alone and would wipe every membership
+        // in the org on a single member-removal event.
         await db
           .delete(schema.memberships)
-          .where(eq(schema.memberships.organizationId, org.id));
+          .where(
+            and(
+              eq(schema.memberships.organizationId, org.id),
+              eq(schema.memberships.userId, user.id),
+            ),
+          );
       }
       break;
     }
