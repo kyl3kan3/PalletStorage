@@ -8,6 +8,8 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { useIsManager } from "~/lib/useRole";
+import { useMatchMedia } from "~/lib/useMatchMedia";
+import { AppointmentStatusBadge } from "~/components/status-badge";
 
 /**
  * Home — "Today" board. Two side-by-side lanes (Inbound / Outbound)
@@ -23,6 +25,7 @@ export default function HomePage() {
   const t = theme;
   const { user } = useUser();
   const isManager = useIsManager();
+  const isMobile = useMatchMedia("(max-width: 1023px)");
   const counts = trpc.appointment.todayCounts.useQuery();
   const upcoming = trpc.appointment.list.useQuery({});
 
@@ -242,11 +245,43 @@ export default function HomePage() {
               <span style={{ fontSize: 11.5, color: t.muted }}>
                 {a.dockCode ? `Dock ${a.dockCode}` : "no door"}
               </span>
-              <StatusTag t={t} status={a.status} />
+              <AppointmentStatusBadge status={a.status} t={t} />
             </Link>
           );
         })}
       </Card>
+
+      {/* Mobile-only sticky FAB so the most-used CTA stays in reach
+          when the dashboard scrolls. Stacked above the cubby-chat
+          FAB (bottom: 20px) by sitting at bottom: 80px. Hidden for
+          non-managers, who don't see the schedule action anyway. */}
+      {isMobile && isManager && (
+        <Link
+          href={"/schedule/new" as Route}
+          aria-label="Schedule a truck"
+          style={{
+            position: "fixed",
+            bottom: 80,
+            right: 20,
+            zIndex: 30,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "14px 20px",
+            borderRadius: 999,
+            background: t.primary,
+            color: t.primaryText,
+            fontFamily: FONTS.sans,
+            fontSize: 14,
+            fontWeight: 700,
+            textDecoration: "none",
+            boxShadow: "0 4px 16px rgba(0,0,0,.18)",
+          }}
+        >
+          <Ic.Plus size={16} />
+          Schedule a truck
+        </Link>
+      )}
     </div>
   );
 }
@@ -324,32 +359,3 @@ function Lane({
   );
 }
 
-function StatusTag({
-  t,
-  status,
-}: {
-  t: typeof theme;
-  status: string;
-}) {
-  const tone =
-    status === "scheduled"
-      ? "neutral"
-      : status === "at_dock"
-        ? "primary"
-        : status === "in_progress"
-          ? "primary"
-          : status === "completed"
-            ? "mint"
-            : "coral";
-  const label =
-    status === "at_dock"
-      ? "at dock"
-      : status === "in_progress"
-        ? "in progress"
-        : status;
-  return (
-    <Tag t={t} tone={tone as "neutral" | "primary" | "mint" | "coral"}>
-      {label}
-    </Tag>
-  );
-}
