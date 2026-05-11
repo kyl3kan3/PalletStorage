@@ -347,6 +347,10 @@ export const palletItems = pgTable(
       .notNull()
       .references(() => products.id),
     qty: integer("qty").notNull(),
+    // Carries the unit context from the source inbound_line so we know
+    // "5 pallets" vs "5 cases" downstream. Defaulted at the column for
+    // legacy rows written before this column existed.
+    qtyUnit: qtyUnit("qty_unit").notNull().default("each"),
     lot: text("lot"),
     expiry: timestamp("expiry", { withTimezone: true }),
   },
