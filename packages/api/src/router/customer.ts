@@ -6,6 +6,7 @@ import { generateLPN } from "@wms/core";
 import { router, tenantProcedure, managerProcedure, adminProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { rateLimit } from "../rateLimit";
+import { logAudit } from "../audit";
 
 // Shared profile schema — used by create + update.
 const profile = z.object({
@@ -285,6 +286,16 @@ export const customerRouter = router({
       if (result.length === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
       }
+
+      await logAudit(ctx.db, {
+        organizationId: orgId,
+        userClerkId: ctx.userId,
+        action: "customer.delete",
+        entityType: "customer",
+        entityId: input.id,
+        metadata: { force: input.force ?? false, blockers },
+      });
+
       return { ok: true, blockers };
     }),
 

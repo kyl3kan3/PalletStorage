@@ -5,6 +5,7 @@ import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { assertInboundTransition, type InboundStatus } from "./_stateMachine";
+import { logAudit } from "../audit";
 
 export const inboundRouter = router({
   list: tenantProcedure
@@ -66,8 +67,8 @@ export const inboundRouter = router({
             organizationId: orgId,
             inboundOrderId: order!.id,
             productId: l.productId,
-            qtyExpected: l.qtyExpected,
             qtyUnit: l.qtyUnit ?? "each",
+            qtyExpected: l.qtyExpected,
           })),
         );
         return order;
@@ -451,6 +452,19 @@ export const inboundRouter = router({
           })
           .where(eq(schema.inboundOrders.id, order.id));
 
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "inbound.close",
+          entityType: "inbound_order",
+          entityId: order.id,
+          metadata: {
+            shortClosed: shortLines.length > 0,
+            shortLines: shortLines.length,
+            closeReason: input.closeReason ?? null,
+          },
+        });
+
         return { ok: true, shortClosed: shortLines.length > 0 };
       });
     }),
@@ -472,6 +486,16 @@ export const inboundRouter = router({
           .update(schema.inboundOrders)
           .set({ status: "cancelled", closeReason: input.reason })
           .where(eq(schema.inboundOrders.id, order.id));
+
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "inbound.cancel",
+          entityType: "inbound_order",
+          entityId: order.id,
+          metadata: { reason: input.reason },
+        });
+
         return { ok: true };
       });
     }),

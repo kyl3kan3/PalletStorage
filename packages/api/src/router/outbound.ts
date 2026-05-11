@@ -6,6 +6,7 @@ import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay } from "@w
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { assertOutboundTransition, type OutboundStatus } from "./_stateMachine";
+import { logAudit } from "../audit";
 
 export const outboundRouter = router({
   list: tenantProcedure
@@ -484,6 +485,20 @@ export const outboundRouter = router({
           .set({ status: "shipped", shippedAt: new Date() })
           .where(eq(schema.outboundOrders.id, order.id));
 
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "outbound.ship",
+          entityType: "outbound_order",
+          entityId: order.id,
+          metadata: {
+            bolNumber,
+            palletCount: palletRows.length,
+            carrier: input.carrier ?? null,
+            trackingNumber: input.trackingNumber ?? null,
+          },
+        });
+
         return { ok: true, shipment };
       });
     }),
@@ -558,6 +573,16 @@ export const outboundRouter = router({
           .update(schema.outboundOrders)
           .set({ status: "cancelled", cancelledAt: new Date(), cancelReason: input.reason })
           .where(eq(schema.outboundOrders.id, order.id));
+
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "outbound.cancel",
+          entityType: "outbound_order",
+          entityId: order.id,
+          metadata: { reason: input.reason },
+        });
+
         return { ok: true };
       });
     }),
