@@ -9,6 +9,7 @@ import { Ic } from "~/components/icons";
 import { HelpText } from "~/components/address-fields";
 import { NewCustomerModal } from "~/components/new-customer-modal";
 import { NewProductModal } from "~/components/new-product-modal";
+import { CustomerContextCard } from "~/components/customer-context-card";
 
 type QtyUnit = "each" | "case" | "pallet";
 
@@ -157,6 +158,41 @@ export default function NewOutboundPage() {
             </Field>
           </div>
 
+          {/* Customer (3PL client / stock owner) — promoted out of the
+              "More details" collapse so the manager can see standing
+              notes + billing rates inline via CustomerContextCard. */}
+          <Field label="Customer (stock owner)">
+            <div style={{ display: "flex", gap: 8 }}>
+              <Select
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                style={{ flex: 1 }}
+              >
+                <option value="">— none —</option>
+                {customers.data?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+              <Btn
+                t={t}
+                type="button"
+                variant="secondary"
+                size="md"
+                icon={Ic.Plus}
+                onClick={() => setNewCustomerOpen(true)}
+              >
+                New
+              </Btn>
+            </div>
+            <HelpText>
+              The 3PL client whose stock is being shipped. We bill this account at month end.
+            </HelpText>
+          </Field>
+
+          {customerId && <CustomerContextCard customerId={customerId} t={t} />}
+
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -174,50 +210,22 @@ export default function NewOutboundPage() {
               gap: 6,
             }}
           >
-            {showAdvanced ? "▾" : "▸"} More details (customer, ship-to)
+            {showAdvanced ? "▾" : "▸"} Consignee details (printed on BOL)
           </button>
 
           {showAdvanced && (
-            <>
-              <Field label="Customer (3PL client)">
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Select
-                    value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                    style={{ flex: 1 }}
-                  >
-                    <option value="">— none —</option>
-                    {customers.data?.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <Btn
-                    t={t}
-                    type="button"
-                    variant="secondary"
-                    size="md"
-                    icon={Ic.Plus}
-                    onClick={() => setNewCustomerOpen(true)}
-                  >
-                    New
-                  </Btn>
-                </div>
-                <HelpText>Whose stock is this? Leave blank for your own stock.</HelpText>
-              </Field>
-              <Field label="Ship to (prints on shipping label)">
-                <TextField
-                  t={t}
-                  value={customer}
-                  onChange={(e) => setCustomer(e.target.value)}
-                  placeholder="Receiver name, e.g. 'Main St Grocery'"
-                />
-                <HelpText>
-                  Who receives the truck at the other end. Often different from the customer account.
-                </HelpText>
-              </Field>
-            </>
+            <Field label="Consignee (printed on BOL)">
+              <TextField
+                t={t}
+                value={customer}
+                onChange={(e) => setCustomer(e.target.value)}
+                placeholder="Recipient name, e.g. 'Main St Grocery'"
+              />
+              <HelpText>
+                Where the truck delivers — recipient&apos;s name and address printed on the
+                Bill of Lading. Often different from the Customer account above.
+              </HelpText>
+            </Field>
           )}
 
           <div>
