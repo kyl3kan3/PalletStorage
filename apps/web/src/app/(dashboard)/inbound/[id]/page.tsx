@@ -33,6 +33,12 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const removeLine = trpc.inbound.removeLine.useMutation({ onSuccess: invalidate });
   const createPallet = trpc.pallet.create.useMutation();
   const receiveLine = trpc.inbound.receiveLine.useMutation({ onSuccess: invalidate });
+  const receiveAll = trpc.inbound.receiveAll.useMutation({
+    onSuccess: () => {
+      utils.inbound.byId.invalidate({ id });
+      utils.inbound.palletsForOrder.invalidate({ inboundOrderId: id });
+    },
+  });
   const movePallet = trpc.pallet.move.useMutation({
     onSuccess: () => {
       utils.inbound.byId.invalidate({ id });
@@ -358,6 +364,85 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
           <HeaderReadout t={t} order={order} receivingCandidates={receivingCandidates} />
         )}
       </Card>
+
+      {/* Receive-all action — surfaces only when the order is in a
+          state where a one-tap receive is meaningful: still open or
+          receiving, no line partially received, lines present.
+          Bulk-receives every line at its expected qty in one tx. */}
+      {!editing && order && isManager && !isTerminal && lines.length > 0 && (() => {
+        const anyPartial = lines.some((l) => l.qtyReceived > 0);
+        if (anyPartial) return null;
+        return (
+          <div style={{ marginTop: 16 }}>
+            <Card t={t} tint="primary">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, color: t.ink }}>
+                    Truck matches the ASN?
+                  </div>
+                  <div style={{ fontSize: 12.5, color: t.muted, marginTop: 4 }}>
+                    Bulk-receive every line at its expected qty. One pallet
+                    per line, landed at{" "}
+                    {order.receivingLocationId
+                      ? receivingCandidates.find(
+                          (l) => l.id === order.receivingLocationId,
+                        )?.code ?? "the receiving dock"
+                      : "the dock"}
+                    {receiveAll.isPending ? "…" : "."} Use the per-line flow
+                    instead if any line is short, over, or damaged.
+                  </div>
+                </div>
+                <Btn
+                  t={t}
+                  variant="accent"
+                  size="md"
+                  icon={Ic.Check}
+                  disabled={receiveAll.isPending}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Create ${lines.length} pallet${
+                          lines.length === 1 ? "" : "s"
+                        } at expected qty and mark received?`,
+                      )
+                    ) {
+                      receiveAll.mutate({ inboundOrderId: id });
+                    }
+                  }}
+                >
+                  {receiveAll.isPending
+                    ? "Receiving…"
+                    : `Receive all (${lines.length} line${
+                        lines.length === 1 ? "" : "s"
+                      })`}
+                </Btn>
+              </div>
+              {receiveAll.error && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: t.coralSoft,
+                    color: t.coral,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                >
+                  {receiveAll.error.message}
+                </div>
+              )}
+            </Card>
+          </div>
+        );
+      })()}
 
       {/* Lines table */}
       <div style={{ marginTop: 16 }}>
