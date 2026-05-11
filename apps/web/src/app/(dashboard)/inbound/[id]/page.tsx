@@ -1042,6 +1042,31 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                 Under-received — pick a reason to short-close.
               </div>
             )}
+            {(() => {
+              // Pallets still on the dock at close time — closing is
+              // allowed but warning is shown so the manager knows
+              // putaway work remains on the Tasks page.
+              const onDock = (pallets.data ?? []).filter(
+                (p) => p.status === "received" || p.status === "in_transit",
+              ).length;
+              if (onDock === 0) return null;
+              return (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    fontSize: 12,
+                    color: t.body,
+                    background: t.skySoft,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                  }}
+                >
+                  {onDock} pallet{onDock === 1 ? " is" : "s are"} still on
+                  the dock. You can close anyway — putaway work moves to
+                  the Tasks page.
+                </div>
+              );
+            })()}
             {hasShort && (
               <div style={{ marginBottom: 10 }}>
                 <ReasonPicker
