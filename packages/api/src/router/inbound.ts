@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, asc, eq, ilike, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
+import { generateLPN } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
 import { assertInboundTransition, type InboundStatus } from "./_stateMachine";
@@ -414,6 +415,165 @@ export const inboundRouter = router({
           );
 
         return { ok: true };
+      });
+    }),
+
+  /**
+   * Bulk-receive every line at its expected qty in one transaction.
+   * The 3PL ASN-match happy path: a 30-line truck that landed clean
+   * gets received with one tap instead of 30. Refuses if anything's
+   * been partially received already — operator falls back to the
+   * per-line flow for variance handling.
+   *
+   * If defaultRackId is provided, every freshly-created pallet gets
+   * putaway'd straight to that rack (status=stored) in the same
+   * transaction. Otherwise pallets land at the dock (status=received)
+   * for separate putaway via the Tasks page.
+   */
+  receiveAll: managerProcedure
+    .input(
+      z.object({
+        inboundOrderId: z.string().uuid(),
+        defaultRackId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.inboundOrders)
+          .where(
+            and(
+              eq(schema.inboundOrders.id, input.inboundOrderId),
+              eq(schema.inboundOrders.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND" });
+        if (order.status !== "open" && order.status !== "receiving") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Can't bulk-receive a ${order.status} order`,
+          });
+        }
+
+        const lines = await tx
+          .select()
+          .from(schema.inboundLines)
+          .where(
+            and(
+              eq(schema.inboundLines.inboundOrderId, order.id),
+              eq(schema.inboundLines.organizationId, orgId),
+            ),
+          );
+        if (lines.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Order has no lines to receive",
+          });
+        }
+        const partial = lines.find((l) => l.qtyReceived > 0);
+        if (partial) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Order is partially received already. Use the per-line receive flow to finish it.",
+          });
+        }
+
+        // One pallet per line, lpn auto-assigned. If defaultRackId is
+        // provided, land each pallet at the rack with status=stored
+        // (skips a separate putaway hop); otherwise drop them at the
+        // receiving dock with status=received so they show up on the
+        // Tasks putaway worklist.
+        const landingLocationId = input.defaultRackId ?? order.receivingLocationId;
+        const targetStatus = input.defaultRackId ? "stored" : "received";
+
+        const palletIds: string[] = [];
+        for (const line of lines) {
+          const lpn = generateLPN();
+          const [pallet] = await tx
+            .insert(schema.pallets)
+            .values({
+              organizationId: orgId,
+              warehouseId: order.warehouseId,
+              customerId: order.customerId ?? null,
+              lpn,
+              status: targetStatus,
+              currentLocationId: landingLocationId ?? null,
+            })
+            .returning({ id: schema.pallets.id });
+          if (!pallet) throw new Error("Failed to create pallet");
+          palletIds.push(pallet.id);
+
+          await tx.insert(schema.labelCodes).values({
+            organizationId: orgId,
+            code: lpn,
+            kind: "pallet",
+            palletId: pallet.id,
+          });
+
+          await tx.insert(schema.palletItems).values({
+            organizationId: orgId,
+            palletId: pallet.id,
+            productId: line.productId,
+            qty: line.qtyExpected,
+            qtyUnit: line.qtyUnit,
+          });
+
+          await tx
+            .update(schema.inboundLines)
+            .set({ qtyReceived: line.qtyExpected })
+            .where(eq(schema.inboundLines.id, line.id));
+
+          // Receive movement: null → receiving location.
+          await tx.insert(schema.movements).values({
+            organizationId: orgId,
+            palletId: pallet.id,
+            fromLocationId: null,
+            toLocationId: order.receivingLocationId ?? null,
+            reason: "receive",
+            refType: "inbound_order",
+            refId: order.id,
+          });
+
+          // Optional putaway movement: receiving location → rack.
+          if (input.defaultRackId) {
+            await tx.insert(schema.movements).values({
+              organizationId: orgId,
+              palletId: pallet.id,
+              fromLocationId: order.receivingLocationId ?? null,
+              toLocationId: input.defaultRackId,
+              reason: "putaway",
+              refType: "inbound_order",
+              refId: order.id,
+            });
+          }
+        }
+
+        // Order goes from open → receiving on bulk-receive (close is a
+        // separate step). Receiving → receiving is a no-op.
+        if (order.status === "open") {
+          await tx
+            .update(schema.inboundOrders)
+            .set({ status: "receiving" })
+            .where(eq(schema.inboundOrders.id, order.id));
+        }
+
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "inbound.receiveAll",
+          entityType: "inbound_order",
+          entityId: order.id,
+          metadata: {
+            palletCount: palletIds.length,
+            putAway: !!input.defaultRackId,
+          },
+        });
+
+        return { ok: true, palletCount: palletIds.length };
       });
     }),
 
