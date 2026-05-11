@@ -40,6 +40,15 @@ body {
     flex-wrap: wrap;
   }
 
+  /* Bump `Btn size="sm"` to a 44px tap target on phones — the design
+   * defaults to 6px/12px padding which feels great on a mouse but
+   * misses on a thumb. Use !important to override the inline styles
+   * the Btn component sets per its size scale. */
+  [data-btn-size="sm"] {
+    min-height: 44px !important;
+    padding: 10px 16px !important;
+  }
+
   /* Generic 3-4 column grids (KPI strips, tile rows) collapse to two
    * columns on narrow phones. Callers can opt out with
    * `data-no-collapse`. */

@@ -15,7 +15,7 @@ import { Ic, type IconProps } from "./icons";
 
 type Icon = (props: IconProps) => ReactNode;
 
-// ───────────────────────────── Button ─────────────────────────────────
+// ──────────────────────────── Button ───────────────────────
 export type BtnVariant = "primary" | "accent" | "secondary" | "ghost" | "danger";
 export type BtnSize = "sm" | "md" | "lg";
 
@@ -66,6 +66,10 @@ export function Btn({
   return (
     <button
       {...rest}
+      // data-btn-size hands off to a globals.css rule that bumps `sm`
+      // to a 44px tap-target on mobile widths without re-rendering on
+      // resize. Desktop sizes are unchanged.
+      data-btn-size={size}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -94,7 +98,7 @@ export function Btn({
   );
 }
 
-// ───────────────────────────── Card ───────────────────────────────────
+// ──────────────────────────── Card ─────────────────────────
 export type CardTint = "primary" | "mint" | "coral" | "sky" | "alt";
 
 export interface CardProps {
@@ -150,7 +154,7 @@ export function Card({
   );
 }
 
-// ───────────────────────────── Tag ────────────────────────────────────
+// ──────────────────────────── Tag ──────────────────────────
 export type TagTone = "primary" | "mint" | "coral" | "sky" | "neutral" | "ink";
 
 export function Tag({
@@ -196,7 +200,7 @@ export function Tag({
   );
 }
 
-// ───────────────────────────── SquircleIcon ───────────────────────────
+// ──────────────────────────── SquircleIcon ───────────────────
 export type IconTint = "primary" | "mint" | "coral" | "sky" | "lilac" | "neutral";
 
 export function SquircleIcon({
@@ -243,7 +247,7 @@ export function SquircleIcon({
   );
 }
 
-// ───────────────────────────── StatBig ────────────────────────────────
+// ──────────────────────────── StatBig ───────────────────────
 export function StatBig({
   t = defaultTheme,
   label,
@@ -298,7 +302,7 @@ export function StatBig({
   );
 }
 
-// ───────────────────────────── Ring ───────────────────────────────────
+// ──────────────────────────── Ring ──────────────────────────
 export function Ring({
   t = defaultTheme,
   size = 64,
@@ -353,7 +357,7 @@ export function Ring({
   );
 }
 
-// ───────────────────────────── Tabs ───────────────────────────────────
+// ──────────────────────────── Tabs ──────────────────────────
 export interface TabItem {
   key: string;
   label: string;
@@ -416,7 +420,7 @@ export function Tabs({
   );
 }
 
-// ───────────────────────────── TextField ──────────────────────────────
+// ──────────────────────────── TextField ─────────────────────
 export function TextField({
   t = defaultTheme,
   style,
@@ -440,7 +444,7 @@ export function TextField({
   );
 }
 
-// ───────────────────────────── Search ─────────────────────────────────
+// ──────────────────────────── Search ────────────────────────
 export function Search({
   t = defaultTheme,
   value,
@@ -486,7 +490,7 @@ export function Search({
   );
 }
 
-// ───────────────────────────── PageTitle ──────────────────────────────
+// ──────────────────────────── PageTitle ──────────────────────
 export function PageTitle({
   t = defaultTheme,
   eyebrow,
