@@ -239,6 +239,22 @@ export const appointmentRouter = router({
             .set({ shippingLocationId: dockId })
             .where(eq(schema.outboundOrders.id, appt.outboundOrderId));
         }
+        // Auto-transition the linked inbound order from 'open' to
+        // 'receiving' on truck arrival. Mirrors what the first
+        // receiveLine call would have done — saves a manual step.
+        // Guarded on status='open' so we don't reset draft or roll
+        // back receiving→receiving etc.
+        if (appt.inboundOrderId) {
+          await tx
+            .update(schema.inboundOrders)
+            .set({ status: "receiving" })
+            .where(
+              and(
+                eq(schema.inboundOrders.id, appt.inboundOrderId),
+                eq(schema.inboundOrders.status, "open"),
+              ),
+            );
+        }
         return { ok: true };
       });
     }),
