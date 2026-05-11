@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, SquircleIcon, TextField } from "~/components/kit";
@@ -88,8 +89,7 @@ export default function WarehousesPage() {
         {list.data?.map((w) => (
           <Link
             key={w.id}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            href={`/warehouses/${w.id}` as any}
+            href={`/warehouses/${w.id}` as Route}
             style={{ textDecoration: "none", color: "inherit" }}
           >
             <Card t={t} padding={18}>
