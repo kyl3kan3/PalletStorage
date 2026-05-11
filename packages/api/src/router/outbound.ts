@@ -588,6 +588,70 @@ export const outboundRouter = router({
     }),
 
   /**
+   * Move an outbound order to a different warehouse before allocation.
+   * Used by the diagnostic on /outbound/[id] when checkInventory shows
+   * the stock lives elsewhere — saves the manager from cancelling and
+   * re-entering the order. Refused once picks exist.
+   */
+  changeWarehouse: managerProcedure
+    .input(z.object({ id: z.string().uuid(), warehouseId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(schema.outboundOrders)
+          .where(
+            and(
+              eq(schema.outboundOrders.id, input.id),
+              eq(schema.outboundOrders.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        if (order.warehouseId === input.warehouseId) return { ok: true, unchanged: true };
+        if (order.status !== "draft" && order.status !== "open") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Can only switch warehouse before picks are generated. Cancel and re-create the order if needed.",
+          });
+        }
+
+        const [target] = await tx
+          .select({ id: schema.warehouses.id })
+          .from(schema.warehouses)
+          .where(
+            and(
+              eq(schema.warehouses.id, input.warehouseId),
+              eq(schema.warehouses.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
+
+        await tx
+          .update(schema.outboundOrders)
+          .set({ warehouseId: input.warehouseId })
+          .where(eq(schema.outboundOrders.id, order.id));
+
+        await logAudit(tx, {
+          organizationId: orgId,
+          userClerkId: ctx.userId,
+          action: "outbound.changeWarehouse",
+          entityType: "outbound_order",
+          entityId: order.id,
+          metadata: {
+            from: order.warehouseId,
+            to: input.warehouseId,
+          },
+        });
+
+        return { ok: true };
+      });
+    }),
+
+  /**
    * Per-product inventory breakdown for an outbound order. Used by
    * the UI when generatePicks returns zero allocations to explain
    * exactly why — usually one of: nothing received yet, received but
