@@ -5,11 +5,18 @@ import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
-import { inboundStatusTone } from "~/lib/statusTone";
-import { friendlyInboundStatus, nextInboundStep } from "~/lib/friendly";
+import { nextInboundStep } from "~/lib/friendly";
 import { NextStepCard } from "~/components/next-step-card";
 import { useIsManager } from "~/lib/useRole";
 import { qtyUnitLabel } from "@wms/core";
+import { Breadcrumbs } from "~/components/breadcrumbs";
+import { InboundStatusBadge, PalletStatusBadge } from "~/components/status-badge";
+import { StickyActionBar } from "~/components/sticky-action-bar";
+import {
+  ReasonPicker,
+  INBOUND_CLOSE_REASONS,
+  INBOUND_CANCEL_REASONS,
+} from "~/components/reason-picker";
 
 export default function InboundDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const t = theme;
@@ -158,6 +165,44 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  // One-tap +1 quick receive — bypasses the qty/lot/expiry form for
+  // the common case (full pallet, no lot tracking). Defaults the
+  // pallet to the first available rack so it lands as `stored` and
+  // is immediately allocatable. Used by the row's "+1" button.
+  const [quickReceivingLineId, setQuickReceivingLineId] = useState<string | null>(null);
+  async function handleQuickReceive(lineId: string) {
+    if (!order) return;
+    setReceiveErr(null);
+    setQuickReceivingLineId(lineId);
+    try {
+      const pallet = await createPallet.mutateAsync({
+        warehouseId: order.warehouseId,
+        customerId: order.customerId ?? null,
+      });
+      if (!pallet) throw new Error("Failed to create pallet");
+      await receiveLine.mutateAsync({
+        inboundLineId: lineId,
+        palletId: pallet.id,
+        qty: 1,
+      });
+      const firstRack = (locations.data ?? [])
+        .filter((loc) => loc.type === "rack")
+        .slice()
+        .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))[0];
+      if (firstRack) {
+        await movePallet.mutateAsync({
+          palletId: pallet.id,
+          toLocationId: firstRack.id,
+          reason: "putaway",
+        });
+      }
+    } catch (e) {
+      setReceiveErr(e instanceof Error ? e.message : "Receive failed");
+    } finally {
+      setQuickReceivingLineId(null);
+    }
+  }
+
   const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
   const status = order?.status ?? "…";
   const isTerminal = status === "closed" || status === "cancelled";
@@ -173,14 +218,19 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div>
+      <Breadcrumbs
+        items={[
+          { label: "Home", href: "/" },
+          { label: "Inbound", href: "/inbound" },
+          { label: order?.reference ? `Ref ${order.reference}` : id.slice(0, 8) },
+        ]}
+      />
       <PageTitle
         eyebrow={order?.reference ? `Ref ${order.reference}` : "Inbound"}
         title={`Inbound ${id.slice(0, 8)}`}
         right={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Tag t={t} tone={inboundStatusTone(status)}>
-              {friendlyInboundStatus(status)}
-            </Tag>
+            <InboundStatusBadge status={status} t={t} />
             {canEdit && !editing && (
               <Btn t={t} variant="secondary" size="sm" icon={Ic.Settings} onClick={beginEdit}>
                 Edit
@@ -215,44 +265,17 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
 
       {/* Next-step card — only when not editing and when there's actually
           something to do. Gives someone with basic warehouse training a
-          clear action label instead of staring at five buttons. */}
+          clear action label instead of staring at five buttons.
+
+          The close action lives in the dedicated Close card further down,
+          which now uses ReasonPicker presets. The next-step card just
+          surfaces the friendly label + a jump to the close action area. */}
       {!editing && order && (() => {
         const step = nextInboundStep(status, hasShort);
         if (!step) return null;
         return (
           <div style={{ marginBottom: 16 }}>
-            <NextStepCard step={step}>
-              {(status === "receiving" || status === "open") && (
-                <>
-                  <Btn
-                    t={t}
-                    variant="accent"
-                    size="md"
-                    icon={Ic.Check}
-                    disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
-                    onClick={() =>
-                      closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
-                    }
-                  >
-                    {closeOrder.isPending ? "Closing…" : step.label}
-                  </Btn>
-                  {hasShort && (
-                    <TextField
-                      t={t}
-                      placeholder="Short-close reason (required)"
-                      value={closeReason}
-                      onChange={(e) => setCloseReason(e.target.value)}
-                      style={{ minWidth: 260, flex: 1 }}
-                    />
-                  )}
-                  {closeOrder.error && (
-                    <span style={{ fontSize: 12, color: t.coral }}>
-                      {closeOrder.error.message}
-                    </span>
-                  )}
-                </>
-              )}
-            </NextStepCard>
+            <NextStepCard step={step} />
           </div>
         );
       })()}
@@ -448,37 +471,64 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                   </button>
                 )}
                 {!editing && (
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 6,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     {canReceive ? (
-                      <Btn
-                        t={t}
-                        type="button"
-                        variant={isReceivingThis ? "ghost" : "primary"}
-                        size="sm"
-                        icon={isReceivingThis ? undefined : Ic.Plus}
-                        onClick={() => {
-                          if (isReceivingThis) {
-                            setReceivingLineId(null);
-                          } else {
-                            setReceivingLineId(l.id);
-                            setReceiveQty(remaining || 1);
-                            setReceiveLot("");
-                            setReceiveExpiry("");
-                            // Default to the first rack in this warehouse
-                            // so the pallet ends up status='stored' and
-                            // allocatable. User can pick a different rack
-                            // or clear to leave it on the dock.
-                            const firstRack = (locations.data ?? [])
-                              .filter((loc) => loc.type === "rack")
-                              .slice()
-                              .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))[0];
-                            setReceivePutawayId(firstRack?.id ?? "");
-                            setReceiveErr(null);
+                      <>
+                        {/* +1 quick-receive: single tap = 1 unit, no lot/
+                            expiry, default rack. Covers ~80% of receives
+                            for a 3PL operating on full pallets. */}
+                        <Btn
+                          t={t}
+                          type="button"
+                          variant="accent"
+                          size="sm"
+                          disabled={
+                            createPallet.isPending ||
+                            receiveLine.isPending ||
+                            movePallet.isPending
                           }
-                        }}
-                      >
-                        {isReceivingThis ? "Cancel" : "Receive"}
-                      </Btn>
+                          onClick={() => handleQuickReceive(l.id)}
+                          title="Receive 1 unit using defaults"
+                        >
+                          {quickReceivingLineId === l.id ? "+1…" : "+1"}
+                        </Btn>
+                        <Btn
+                          t={t}
+                          type="button"
+                          variant={isReceivingThis ? "ghost" : "primary"}
+                          size="sm"
+                          icon={isReceivingThis ? undefined : Ic.Plus}
+                          onClick={() => {
+                            if (isReceivingThis) {
+                              setReceivingLineId(null);
+                            } else {
+                              setReceivingLineId(l.id);
+                              setReceiveQty(remaining || 1);
+                              setReceiveLot("");
+                              setReceiveExpiry("");
+                              // Default to the first rack in this warehouse
+                              // so the pallet ends up status='stored' and
+                              // allocatable. User can pick a different rack
+                              // or clear to leave it on the dock.
+                              const firstRack = (locations.data ?? [])
+                                .filter((loc) => loc.type === "rack")
+                                .slice()
+                                .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))[0];
+                              setReceivePutawayId(firstRack?.id ?? "");
+                              setReceiveErr(null);
+                            }
+                          }}
+                        >
+                          {isReceivingThis ? "Cancel" : "Receive…"}
+                        </Btn>
+                      </>
                     ) : (
                       <span style={{ fontSize: 11, color: t.muted }}>
                         {isTerminal ? "—" : "done"}
@@ -793,18 +843,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                   >
                     {p.lpn}
                   </span>
-                  <Tag
-                    t={t}
-                    tone={
-                      p.status === "stored"
-                        ? "mint"
-                        : p.status === "received"
-                          ? "primary"
-                          : "neutral"
-                    }
-                  >
-                    {p.status}
-                  </Tag>
+                  <PalletStatusBadge status={p.status} t={t} />
                   <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
                     {p.locationCode ?? "—"}
                   </span>
@@ -915,30 +954,32 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                   borderRadius: 8,
                 }}
               >
-                Under-received — a reason is required to short-close.
+                Under-received — pick a reason to short-close.
               </div>
             )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <TextField
-                t={t}
-                placeholder={hasShort ? "Short-close reason (required)" : "Reason (optional)"}
-                value={closeReason}
-                onChange={(e) => setCloseReason(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <Btn
-                t={t}
-                variant="primary"
-                size="md"
-                icon={Ic.Check}
-                disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
-                onClick={() =>
-                  closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
-                }
-              >
-                {closeOrder.isPending ? "Closing…" : "Close"}
-              </Btn>
-            </div>
+            {hasShort && (
+              <div style={{ marginBottom: 10 }}>
+                <ReasonPicker
+                  t={t}
+                  presets={INBOUND_CLOSE_REASONS}
+                  value={closeReason}
+                  onChange={setCloseReason}
+                  otherPlaceholder="Tell us what happened…"
+                />
+              </div>
+            )}
+            <Btn
+              t={t}
+              variant="primary"
+              size="md"
+              icon={Ic.Check}
+              disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
+              onClick={() =>
+                closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
+              }
+            >
+              {closeOrder.isPending ? "Closing…" : "Close order"}
+            </Btn>
             {closeOrder.error && (
               <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
                 {closeOrder.error.message}
@@ -948,25 +989,25 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
 
           <Card t={t}>
             <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Cancel order</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <TextField
+            <div style={{ marginBottom: 10 }}>
+              <ReasonPicker
                 t={t}
-                placeholder="Cancel reason (required)"
+                presets={INBOUND_CANCEL_REASONS}
                 value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                style={{ flex: 1 }}
+                onChange={setCancelReason}
+                otherPlaceholder="Tell us why…"
               />
-              <Btn
-                t={t}
-                variant="danger"
-                size="md"
-                icon={Ic.X}
-                disabled={cancelOrder.isPending || !cancelReason.trim()}
-                onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
-              >
-                {cancelOrder.isPending ? "Cancelling…" : "Cancel"}
-              </Btn>
             </div>
+            <Btn
+              t={t}
+              variant="danger"
+              size="md"
+              icon={Ic.X}
+              disabled={cancelOrder.isPending || !cancelReason.trim()}
+              onClick={() => cancelOrder.mutate({ id, reason: cancelReason.trim() })}
+            >
+              {cancelOrder.isPending ? "Cancelling…" : "Cancel order"}
+            </Btn>
             {cancelOrder.error && (
               <div style={{ marginTop: 8, fontSize: 12, color: t.coral }}>
                 {cancelOrder.error.message}
@@ -974,6 +1015,31 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
             )}
           </Card>
         </div>
+      )}
+
+      {/* Sticky mobile action bar — keeps the primary action ("Close
+          order" once everything's received) in reach without scrolling
+          back to the close card on long detail pages. Only renders the
+          bar on mobile; on desktop the cards above are always visible. */}
+      {!isTerminal && !editing && isManager && (status === "receiving" || status === "open") && (
+        <StickyActionBar t={t}>
+          <Btn
+            t={t}
+            variant="accent"
+            size="md"
+            icon={Ic.Check}
+            disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
+            onClick={() =>
+              closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
+            }
+          >
+            {closeOrder.isPending
+              ? "Closing…"
+              : hasShort
+                ? "Short-close"
+                : "Close order"}
+          </Btn>
+        </StickyActionBar>
       )}
 
       {isTerminal && order?.closeReason && (

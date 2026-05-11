@@ -15,7 +15,7 @@ export function NextStepCard({
   children,
 }: {
   step: NextStep;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const t = theme;
   const tint =
@@ -65,9 +65,11 @@ export function NextStepCard({
       >
         {step.blurb}
       </div>
-      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {children}
-      </div>
+      {children && (
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {children}
+        </div>
+      )}
     </Card>
   );
 }
