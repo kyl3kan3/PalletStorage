@@ -15,9 +15,9 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Enums
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const memberRole = pgEnum("member_role", ["admin", "manager", "operator"]);
 export const locationType = pgEnum("location_type", ["floor", "rack", "staging", "dock"]);
 export const palletStatus = pgEnum("pallet_status", [
@@ -65,9 +65,9 @@ export const appointmentStatus = pgEnum("appointment_status", [
   "cancelled",
 ]);
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Tenancy
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   clerkOrgId: text("clerk_org_id").unique(),
@@ -115,9 +115,9 @@ export const memberships = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Warehouses & Locations
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const warehouses = pgTable(
   "warehouses",
   {
@@ -197,9 +197,9 @@ export const locations = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Customers & Suppliers
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 /**
  * 3PL customers — clients of the warehouse whose pallets we store.
  * Distinct from the free-text `customer` field on outbound_orders,
@@ -277,9 +277,9 @@ export const suppliers = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Products & Pallets
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const products = pgTable(
   "products",
   {
@@ -356,9 +356,9 @@ export const palletItems = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Inbound (ASN / receiving)
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const inboundOrders = pgTable(
   "inbound_orders",
   {
@@ -409,9 +409,9 @@ export const inboundLines = pgTable("inbound_lines", {
   qtyUnit: qtyUnit("qty_unit").notNull().default("each"),
 });
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Outbound (orders / picks)
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const outboundOrders = pgTable(
   "outbound_orders",
   {
@@ -516,9 +516,9 @@ export const shipments = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Movements (audit ledger — source of truth)
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const movements = pgTable(
   "movements",
   {
@@ -544,9 +544,9 @@ export const movements = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Cycle counts (stock takes) — task-driven variance + approval
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 /**
  * A cycle count task: scoped to a single location for v1 (product/full
  * warehouse scope can be added later). The count progresses through
@@ -605,9 +605,9 @@ export const cycleCountLines = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Label codes — short scannable codes resolving to pallet or location
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const labelCodes = pgTable(
   "label_codes",
   {
@@ -627,9 +627,9 @@ export const labelCodes = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // QuickBooks integration
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const quickbooksConnections = pgTable("quickbooks_connections", {
   organizationId: uuid("organization_id")
     .primaryKey()
@@ -696,10 +696,10 @@ export const quickbooksWebhookEvents = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Dock scheduling — trucks call to schedule, we assign a door on
 // arrival, and link to the inbound / outbound order being worked.
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const dockAppointments = pgTable(
   "dock_appointments",
   {
@@ -752,9 +752,37 @@ export const dockAppointments = pgTable(
   }),
 );
 
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
+// Audit log — append-only record of sensitive mutations (order close/
+// cancel, customer delete, billing-rate change). RLS-isolated per org.
+// ───────────────────────────────────────────────────────────────────
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    orgCreatedIdx: index("audit_log_org_created_idx").on(
+      t.organizationId,
+      t.createdAt,
+    ),
+  }),
+);
+
+// ───────────────────────────────────────────────────────────────────
 // Relations
-// ──────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   memberships: many(memberships),
   warehouses: many(warehouses),
