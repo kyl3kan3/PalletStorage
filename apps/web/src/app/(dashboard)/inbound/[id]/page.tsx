@@ -69,6 +69,11 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   const [closeReason, setCloseReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [editing, setEditing] = useState(false);
+  // Optional rack for the bulk Receive-all flow. Empty = pallets stay
+  // on the dock (status=received) and show up on the Tasks putaway
+  // worklist. Filled = pallets are moved straight to the rack in the
+  // same transaction so they're allocatable immediately.
+  const [receiveAllRackId, setReceiveAllRackId] = useState("");
 
   // Edit state — initialised from the current order when editing begins.
   const [draft, setDraft] = useState({
@@ -368,10 +373,17 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
       {/* Receive-all action — surfaces only when the order is in a
           state where a one-tap receive is meaningful: still open or
           receiving, no line partially received, lines present.
-          Bulk-receives every line at its expected qty in one tx. */}
+          Bulk-receives every line at its expected qty in one tx.
+          Optional rack picker next to the button: empty = pallets stay
+          on the dock for separate putaway; filled = pallets are moved
+          straight to the rack in the same transaction. */}
       {!editing && order && isManager && !isTerminal && lines.length > 0 && (() => {
         const anyPartial = lines.some((l) => l.qtyReceived > 0);
         if (anyPartial) return null;
+        const rackOptions = (locations.data ?? [])
+          .filter((l) => l.type === "rack")
+          .slice()
+          .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
         return (
           <div style={{ marginTop: 16 }}>
             <Card t={t} tint="primary">
@@ -384,7 +396,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                   flexWrap: "wrap",
                 }}
               >
-                <div>
+                <div style={{ flex: 1, minWidth: 240 }}>
                   <div style={{ fontWeight: 600, color: t.ink }}>
                     Truck matches the ASN?
                   </div>
@@ -400,30 +412,75 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                     instead if any line is short, over, or damaged.
                   </div>
                 </div>
-                <Btn
-                  t={t}
-                  variant="accent"
-                  size="md"
-                  icon={Ic.Check}
-                  disabled={receiveAll.isPending}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Create ${lines.length} pallet${
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: t.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Put away to
+                    </span>
+                    <select
+                      value={receiveAllRackId}
+                      onChange={(e) => setReceiveAllRackId(e.target.value)}
+                      disabled={rackOptions.length === 0}
+                      style={{
+                        padding: "9px 12px",
+                        borderRadius: 12,
+                        background: t.surfaceAlt,
+                        border: `1.5px solid ${t.border}`,
+                        fontFamily: FONTS.mono,
+                        fontSize: 12.5,
+                        color: t.ink,
+                        cursor: "pointer",
+                        minWidth: 160,
+                      }}
+                    >
+                      <option value="">Leave on dock</option>
+                      {rackOptions.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.code}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Btn
+                    t={t}
+                    variant="accent"
+                    size="md"
+                    icon={Ic.Check}
+                    disabled={receiveAll.isPending}
+                    onClick={() => {
+                      const rackLabel = receiveAllRackId
+                        ? rackOptions.find((r) => r.id === receiveAllRackId)?.code ?? "a rack"
+                        : null;
+                      const msg = rackLabel
+                        ? `Create ${lines.length} pallet${
+                            lines.length === 1 ? "" : "s"
+                          } at expected qty and put them away to ${rackLabel}?`
+                        : `Create ${lines.length} pallet${
+                            lines.length === 1 ? "" : "s"
+                          } at expected qty and leave them on the dock?`;
+                      if (window.confirm(msg)) {
+                        receiveAll.mutate({
+                          inboundOrderId: id,
+                          defaultRackId: receiveAllRackId || undefined,
+                        });
+                      }
+                    }}
+                  >
+                    {receiveAll.isPending
+                      ? "Receiving…"
+                      : `Receive all (${lines.length} line${
                           lines.length === 1 ? "" : "s"
-                        } at expected qty and mark received?`,
-                      )
-                    ) {
-                      receiveAll.mutate({ inboundOrderId: id });
-                    }
-                  }}
-                >
-                  {receiveAll.isPending
-                    ? "Receiving…"
-                    : `Receive all (${lines.length} line${
-                        lines.length === 1 ? "" : "s"
-                      })`}
-                </Btn>
+                        })`}
+                  </Btn>
+                </div>
               </div>
               {receiveAll.error && (
                 <div
