@@ -21,17 +21,27 @@ import { Ic } from "~/components/icons";
 export default function StockPage() {
   const t = theme;
   const sp = useSearchParams();
-  // Default to "By pallet" when arriving with a customer pre-selected,
-  // so the inventory column is visible immediately.
+  // Default to "By pallet" when arriving with a customer / status / warehouse
+  // pre-selected, so the inventory column is visible immediately.
   const [tab, setTab] = useState<"product" | "pallet">(
-    sp.get("customer") ? "pallet" : "product",
+    sp.get("customer") || sp.get("status") || sp.get("warehouse") ? "pallet" : "product",
   );
   const [q, setQ] = useState("");
-  const [warehouseId, setWarehouseId] = useState<string>("");
+  const [warehouseId, setWarehouseId] = useState<string>(sp.get("warehouse") ?? "");
   const [customerId, setCustomerId] = useState<string>(sp.get("customer") ?? "");
+  const initialStatus = sp.get("status");
   const [status, setStatus] = useState<
     "" | "in_transit" | "received" | "stored" | "picked" | "shipped" | "damaged"
-  >("");
+  >(
+    initialStatus === "in_transit" ||
+      initialStatus === "received" ||
+      initialStatus === "stored" ||
+      initialStatus === "picked" ||
+      initialStatus === "shipped" ||
+      initialStatus === "damaged"
+      ? initialStatus
+      : "",
+  );
 
   const warehouses = trpc.warehouse.list.useQuery();
   const customers = trpc.customer.list.useQuery();
