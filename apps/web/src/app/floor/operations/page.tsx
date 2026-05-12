@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill, KPI } from "~/components/kit";
+import { FCard, FBtn, FPill, KPI, LiveAgo } from "~/components/kit";
 import { floorTheme as t, FONTS } from "~/lib/theme";
 import { Ic } from "~/components/icons";
 
@@ -70,7 +70,11 @@ export default function FloorOperationsPreview() {
       active="operations"
       eyebrow="Live operations"
       title="Operations"
-      subtitle="WH-01 · TACOMA · updated 4s ago"
+      subtitle={
+        <span>
+          WH-01 · TACOMA · <LiveAgo t={t} prefix="updated" />
+        </span>
+      }
     >
       {/* ─── KPI row ─────────────────────────────────────────────── */}
       <div
