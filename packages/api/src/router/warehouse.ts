@@ -2,7 +2,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { schema } from "@wms/db";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
-import { requireOrgId } from "./_helpers";
+import { requireOrgId, throwIfDuplicate } from "./_helpers";
 
 // Columns we want shipped to the client. Excludes the mapPdfData
 // bytea blob on purpose — a 3MB PDF sent through tRPC/superjson
@@ -33,11 +33,20 @@ export const warehouseRouter = router({
     .input(z.object({ code: z.string().min(1), name: z.string().min(1), timezone: z.string().default("UTC") }))
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      const [row] = await ctx.db
-        .insert(schema.warehouses)
-        .values({ organizationId: orgId, ...input })
-        .returning(warehouseSelect);
-      return row;
+      try {
+        const [row] = await ctx.db
+          .insert(schema.warehouses)
+          .values({ organizationId: orgId, ...input })
+          .returning(warehouseSelect);
+        return row;
+      } catch (e) {
+        // (organization_id, code) is unique — warehouses_org_code_uq.
+        throwIfDuplicate(
+          e,
+          `A warehouse with code "${input.code}" already exists. Pick a different code.`,
+        );
+        throw e;
+      }
     }),
 
   byId: tenantProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
