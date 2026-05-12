@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { allocate, generateBolNumber, orderPicksSShape, parseAisleBay } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
-import { requireOrgId } from "./_helpers";
+import { requireOrgId, throwIfDuplicate } from "./_helpers";
 import { assertOutboundTransition, type OutboundStatus } from "./_stateMachine";
 import { logAudit } from "../audit";
 
@@ -45,31 +45,41 @@ export const outboundRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      return ctx.db.transaction(async (tx) => {
-        const [order] = await tx
-          .insert(schema.outboundOrders)
-          .values({
-            organizationId: orgId,
-            warehouseId: input.warehouseId,
-            reference: input.reference,
-            customer: input.customer,
-            customerId: input.customerId ?? null,
-            shipBy: input.shipBy,
-            status: "open",
-          })
-          .returning();
+      try {
+        return await ctx.db.transaction(async (tx) => {
+          const [order] = await tx
+            .insert(schema.outboundOrders)
+            .values({
+              organizationId: orgId,
+              warehouseId: input.warehouseId,
+              reference: input.reference,
+              customer: input.customer,
+              customerId: input.customerId ?? null,
+              shipBy: input.shipBy,
+              status: "open",
+            })
+            .returning();
 
-        await tx.insert(schema.outboundLines).values(
-          input.lines.map((l) => ({
-            organizationId: orgId,
-            outboundOrderId: order!.id,
-            productId: l.productId,
-            qtyOrdered: l.qtyOrdered,
-            qtyUnit: l.qtyUnit ?? "each",
-          })),
+          await tx.insert(schema.outboundLines).values(
+            input.lines.map((l) => ({
+              organizationId: orgId,
+              outboundOrderId: order!.id,
+              productId: l.productId,
+              qtyOrdered: l.qtyOrdered,
+              qtyUnit: l.qtyUnit ?? "each",
+            })),
+          );
+          return order;
+        });
+      } catch (e) {
+        // (organization_id, reference) is the only relevant unique
+        // constraint on this path (outbound_org_ref_uq).
+        throwIfDuplicate(
+          e,
+          `An outbound order with reference "${input.reference}" already exists. Pick a different reference or open the existing order.`,
         );
-        return order;
-      });
+        throw e;
+      }
     }),
 
   /** Detail view with lines, for the web dashboard. */
