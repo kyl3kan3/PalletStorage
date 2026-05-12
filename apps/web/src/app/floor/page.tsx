@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill, KPI } from "~/components/kit";
+import { FCard, FBtn, FPill, KPI, LiveAgo } from "~/components/kit";
 import { floorTheme as t, FONTS, Cubby } from "~/lib/theme";
 import { Ic } from "~/components/icons";
 
@@ -123,7 +123,7 @@ export default function FloorHomePreview() {
       active="home"
       eyebrow="Today's operations"
       title="42 picks in flight, 2 trucks at the dock."
-      subtitle="Live · updated just now"
+      subtitle={<LiveAgo t={t} />}
       actions={
         <>
           <FBtn t={t} variant="ghost" size="md">
