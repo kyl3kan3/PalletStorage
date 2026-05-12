@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
 import { router, tenantProcedure, managerProcedure } from "../trpc";
-import { requireOrgId } from "./_helpers";
+import { requireOrgId, isUniqueViolation, throwIfDuplicate } from "./_helpers";
 import { assertInboundTransition, type InboundStatus } from "./_stateMachine";
 import { logAudit } from "../audit";
 
@@ -47,33 +47,44 @@ export const inboundRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      return ctx.db.transaction(async (tx) => {
-        const [order] = await tx
-          .insert(schema.inboundOrders)
-          .values({
-            organizationId: orgId,
-            warehouseId: input.warehouseId,
-            reference: input.reference,
-            supplier: input.supplier,
-            supplierId: input.supplierId ?? null,
-            customerId: input.customerId ?? null,
-            receivingLocationId: input.receivingLocationId ?? null,
-            expectedAt: input.expectedAt,
-            status: "open",
-          })
-          .returning();
+      try {
+        return await ctx.db.transaction(async (tx) => {
+          const [order] = await tx
+            .insert(schema.inboundOrders)
+            .values({
+              organizationId: orgId,
+              warehouseId: input.warehouseId,
+              reference: input.reference,
+              supplier: input.supplier,
+              supplierId: input.supplierId ?? null,
+              customerId: input.customerId ?? null,
+              receivingLocationId: input.receivingLocationId ?? null,
+              expectedAt: input.expectedAt,
+              status: "open",
+            })
+            .returning();
 
-        await tx.insert(schema.inboundLines).values(
-          input.lines.map((l) => ({
-            organizationId: orgId,
-            inboundOrderId: order!.id,
-            productId: l.productId,
-            qtyUnit: l.qtyUnit ?? "each",
-            qtyExpected: l.qtyExpected,
-          })),
+          await tx.insert(schema.inboundLines).values(
+            input.lines.map((l) => ({
+              organizationId: orgId,
+              inboundOrderId: order!.id,
+              productId: l.productId,
+              qtyUnit: l.qtyUnit ?? "each",
+              qtyExpected: l.qtyExpected,
+            })),
+          );
+          return order;
+        });
+      } catch (e) {
+        // The only unique constraint on this insert path is
+        // (organization_id, reference) — see inbound_org_ref_uq in
+        // schema.ts. Anything else here is a real bug, so re-throw.
+        throwIfDuplicate(
+          e,
+          `An inbound order with reference "${input.reference}" already exists. Pick a different reference or open the existing order.`,
         );
-        return order;
-      });
+        throw e;
+      }
     }),
 
   /**
@@ -137,10 +148,20 @@ export const inboundRouter = router({
 
       if (Object.keys(patch).length === 0) return { ok: true };
 
-      await ctx.db
-        .update(schema.inboundOrders)
-        .set(patch)
-        .where(eq(schema.inboundOrders.id, order.id));
+      try {
+        await ctx.db
+          .update(schema.inboundOrders)
+          .set(patch)
+          .where(eq(schema.inboundOrders.id, order.id));
+      } catch (e) {
+        // Reference changes can collide with another open order's
+        // reference under the (org_id, reference) unique index.
+        throwIfDuplicate(
+          e,
+          `An inbound order with reference "${input.reference ?? ""}" already exists.`,
+        );
+        throw e;
+      }
       return { ok: true };
     }),
 
@@ -951,7 +972,8 @@ export const inboundRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = await requireOrgId(ctx);
-      return ctx.db.transaction(async (tx) => {
+      try {
+        return await ctx.db.transaction(async (tx) => {
         // Resolve supplier (find by name; auto-create if missing).
         let supplierId: string | null = null;
         if (input.supplierName) {
@@ -1000,10 +1022,38 @@ export const inboundRouter = router({
         }
 
         // Resolve product ids (find or create with placeholder SKU).
+        //
+        // Lookup order matters: SKU first, then name. The unique index
+        // is on (organization_id, sku) — if the user supplies an
+        // existing SKU under a slightly different name, we still want
+        // to reuse the existing product instead of trying to insert a
+        // duplicate. Name lookup is the fallback for AI-extracted
+        // rows where no SKU was extracted at all.
         const productIds: string[] = [];
         for (const line of input.lines) {
+          const providedSku = line.sku?.trim() || undefined;
+
+          // 1) Try by SKU when the import supplied one.
+          if (providedSku) {
+            const [bySku] = await tx
+              .select({ id: schema.products.id })
+              .from(schema.products)
+              .where(
+                and(
+                  eq(schema.products.organizationId, orgId),
+                  eq(schema.products.sku, providedSku),
+                ),
+              )
+              .limit(1);
+            if (bySku) {
+              productIds.push(bySku.id);
+              continue;
+            }
+          }
+
+          // 2) Try by name (case-insensitive, trimmed).
           const key = line.productName.trim().toLowerCase();
-          const [existing] = await tx
+          const [byName] = await tx
             .select({ id: schema.products.id })
             .from(schema.products)
             .where(
@@ -1013,11 +1063,16 @@ export const inboundRouter = router({
               ),
             )
             .limit(1);
-          if (existing) {
-            productIds.push(existing.id);
+          if (byName) {
+            productIds.push(byName.id);
             continue;
           }
-          let sku = line.sku?.trim() || undefined;
+
+          // 3) Insert. If a SKU collision still happens (e.g. a race
+          // or a product that exists under a different name with the
+          // same SKU somehow eluded both lookups), surface a friendly
+          // CONFLICT instead of the raw `duplicate key` Postgres msg.
+          let sku = providedSku;
           if (!sku) {
             const slug = line.productName
               .trim()
@@ -1027,16 +1082,26 @@ export const inboundRouter = router({
               .replace(/^-+|-+$/g, "");
             sku = `IMP-${slug || "ITEM"}-${Date.now().toString(36).slice(-5)}`;
           }
-          const [created] = await tx
-            .insert(schema.products)
-            .values({
-              organizationId: orgId,
-              name: line.productName.trim(),
-              sku,
-            })
-            .returning({ id: schema.products.id });
-          if (!created) throw new Error("Failed to create product");
-          productIds.push(created.id);
+          try {
+            const [created] = await tx
+              .insert(schema.products)
+              .values({
+                organizationId: orgId,
+                name: line.productName.trim(),
+                sku,
+              })
+              .returning({ id: schema.products.id });
+            if (!created) throw new Error("Failed to create product");
+            productIds.push(created.id);
+          } catch (e) {
+            if (isUniqueViolation(e)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Couldn't import "${line.productName}": SKU "${sku}" is already used by another product in this org.`,
+              });
+            }
+            throw e;
+          }
         }
 
         const [order] = await tx
@@ -1064,6 +1129,13 @@ export const inboundRouter = router({
         );
 
         return { id: order.id };
-      });
+        });
+      } catch (e) {
+        throwIfDuplicate(
+          e,
+          `An inbound order with reference "${input.reference}" already exists. Pick a different reference or open the existing order.`,
+        );
+        throw e;
+      }
     }),
 });
