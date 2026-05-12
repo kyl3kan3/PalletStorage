@@ -1,47 +1,78 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FShell, type FShellTab } from "~/components/floor-shell";
-import { FCard, FBtn, FPill } from "~/components/kit";
+import { FCard, FBtn, FPill, Skeleton, EmptyState } from "~/components/kit";
 import { floorTheme as t, FONTS } from "~/lib/theme";
 import { Ic } from "~/components/icons";
+import { trpc } from "~/lib/trpc";
 
 /**
- * Floor-mode Products list preview at /floor/products.
+ * Floor-mode Products list at /floor/products.
  *
- * Filter strip: All (1284) · A · B · C velocity tabs + Filter button
- * Table: SKU | Name | Barcode | Weight | Velocity | On hand | Loc count
- *
- * Mock data; later phase wires product.list({ warehouseId, vel, search }).
+ * Tabs filter by velocity class (A / B / C). The product router's
+ * `search` query already returns per-product `storedQty` so we render
+ * "on hand" without a second roundtrip; per-product loc count isn't
+ * in the procedure today so we omit the column instead of faking it.
  */
 
-const TABS: FShellTab[] = [
-  { key: "all", label: "All", count: 1284 },
-  { key: "A", label: "A", count: 184 },
-  { key: "B", label: "B", count: 624 },
-  { key: "C", label: "C", count: 476 },
-];
-
-const ROWS = [
-  { sku: "SKU-00041", name: "Vanilla Extract 8oz", barcode: "0739410022", weight: "0.6 kg", vel: "A", onHand: "2,880 ea", locs: 6 },
-  { sku: "SKU-00102", name: "Cane Sugar 50lb", barcode: "0739410089", weight: "22.7 kg", vel: "A", onHand: "1,440 cs", locs: 4 },
-  { sku: "SKU-00038", name: "Coffee Beans 5lb", barcode: "0739410112", weight: "2.3 kg", vel: "B", onHand: "1,200 cs", locs: 5 },
-  { sku: "SKU-00211", name: "Whole Tomatoes #10", barcode: "0739410203", weight: "3.1 kg", vel: "B", onHand: "1,008 cs", locs: 3 },
-  { sku: "SKU-00150", name: "Olive Oil 1L", barcode: "0739410167", weight: "0.9 kg", vel: "A", onHand: "840 ea", locs: 4 },
-  { sku: "SKU-00078", name: "Sea Salt 16oz", barcode: "0739410055", weight: "0.5 kg", vel: "C", onHand: "624 ea", locs: 2 },
-  { sku: "SKU-00284", name: "Black Pepper 8oz", barcode: "0739410274", weight: "0.3 kg", vel: "C", onHand: "480 ea", locs: 2 },
-  { sku: "SKU-00392", name: "Almond Flour 25lb", barcode: "0739410361", weight: "11.3 kg", vel: "B", onHand: "360 cs", locs: 2 },
+const TABS: Array<FShellTab & { vel: "A" | "B" | "C" | null }> = [
+  { key: "all", label: "All", vel: null },
+  { key: "A", label: "A", vel: "A" },
+  { key: "B", label: "B", vel: "B" },
+  { key: "C", label: "C", vel: "C" },
 ];
 
 export default function FloorProductsList() {
   const [tab, setTab] = useState("all");
 
+  // product.search currently returns id / sku / name / barcode /
+  // weightKg / velocityClass / unitPriceCents / storedQty / totalQty
+  // — everything we need except per-product location count.
+  const list = trpc.product.search.useQuery({ q: "", limit: 500 });
+
+  const grouped = useMemo(() => {
+    const all = list.data ?? [];
+    return {
+      all: all.length,
+      A: all.filter((p) => p.velocityClass === "A").length,
+      B: all.filter((p) => p.velocityClass === "B").length,
+      C: all.filter((p) => p.velocityClass === "C").length,
+    };
+  }, [list.data]);
+
+  const filtered = useMemo(() => {
+    const all = list.data ?? [];
+    const active = TABS.find((tb) => tb.key === tab);
+    if (!active?.vel) return all;
+    return all.filter((p) => p.velocityClass === active.vel);
+  }, [list.data, tab]);
+
+  const tabs: FShellTab[] = TABS.map((tb) => ({
+    key: tb.key,
+    label: tb.label,
+    count: grouped[tb.key as keyof typeof grouped],
+  }));
+
+  const totalCount = grouped.all;
+  const withPrice = useMemo(
+    () =>
+      (list.data ?? []).filter((p) => p.unitPriceCents != null && p.unitPriceCents > 0)
+        .length,
+    [list.data],
+  );
+  const pricePct = totalCount > 0 ? Math.round((withPrice / totalCount) * 100) : 0;
+
   return (
     <FShell
       eyebrow="Catalog"
       title="Products"
-      subtitle="1,284 SKUs · 84% have prices"
-      tabs={TABS}
+      subtitle={
+        list.isLoading
+          ? "Loading…"
+          : `${totalCount.toLocaleString()} SKUs · ${pricePct}% have prices`
+      }
+      tabs={tabs}
       tabActive={tab}
       onTabChange={setTab}
       actions={
@@ -54,7 +85,7 @@ export default function FloorProductsList() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "120px 1.4fr 130px 80px 70px 110px 80px",
+            gridTemplateColumns: "120px 1.4fr 140px 80px 70px 120px",
             gap: 14,
             padding: "12px 20px",
             fontFamily: FONTS.mono,
@@ -71,14 +102,33 @@ export default function FloorProductsList() {
           <div>Weight</div>
           <div>Vel</div>
           <div style={{ textAlign: "right" }}>On hand</div>
-          <div style={{ textAlign: "right" }}>Locs</div>
         </div>
-        {ROWS.map((r) => (
+        {list.isLoading && (
+          <div style={{ padding: 20 }}>
+            <Skeleton t={t} lines={6} rowHeight={44} />
+          </div>
+        )}
+        {!list.isLoading && filtered.length === 0 && (
+          <EmptyState
+            t={t}
+            title={
+              tab === "all"
+                ? "No products yet"
+                : `No ${tab} velocity products`
+            }
+            hint={
+              tab === "all"
+                ? "Add a product on the legacy /products page to start populating the catalog."
+                : "Try a different velocity tab or add velocity class to your existing products."
+            }
+          />
+        )}
+        {filtered.map((p) => (
           <div
-            key={r.sku}
+            key={p.id}
             style={{
               display: "grid",
-              gridTemplateColumns: "120px 1.4fr 130px 80px 70px 110px 80px",
+              gridTemplateColumns: "120px 1.4fr 140px 80px 70px 120px",
               gap: 14,
               padding: "12px 20px",
               alignItems: "center",
@@ -92,11 +142,14 @@ export default function FloorProductsList() {
                 fontWeight: 700,
                 color: t.ink,
                 letterSpacing: 0.2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
-              {r.sku}
+              {p.sku ?? "—"}
             </span>
-            <span style={{ fontSize: 13, color: t.body }}>{r.name}</span>
+            <span style={{ fontSize: 13, color: t.body }}>{p.name}</span>
             <span
               style={{
                 fontFamily: FONTS.mono,
@@ -104,62 +157,42 @@ export default function FloorProductsList() {
                 color: t.muted,
               }}
             >
-              {r.barcode}
+              {p.barcode ?? "—"}
             </span>
             <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.body }}>
-              {r.weight}
+              {p.weightKg ? `${p.weightKg} kg` : "—"}
             </span>
             <span>
-              <FPill t={t} tone={velocityTone(r.vel)} size="sm">
-                {r.vel}
-              </FPill>
+              {p.velocityClass ? (
+                <FPill t={t} tone={velocityTone(p.velocityClass)} size="sm">
+                  {p.velocityClass}
+                </FPill>
+              ) : (
+                <span style={{ color: t.mutedSoft, fontFamily: FONTS.mono, fontSize: 11 }}>
+                  —
+                </span>
+              )}
             </span>
             <span
               style={{
                 fontFamily: FONTS.mono,
                 fontSize: 14,
                 fontWeight: 800,
-                color: t.ink,
+                color: p.storedQty > 0 ? t.ink : t.muted,
                 textAlign: "right",
                 letterSpacing: -0.3,
               }}
             >
-              {r.onHand}
-            </span>
-            <span
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                color: t.muted,
-                textAlign: "right",
-              }}
-            >
-              {r.locs}
+              {p.storedQty.toLocaleString()}
             </span>
           </div>
         ))}
       </FCard>
-
-      <div
-        style={{
-          marginTop: 24,
-          padding: "14px 18px",
-          background: t.surface,
-          border: `1px dashed ${t.border}`,
-          borderRadius: 12,
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          color: t.mutedSoft,
-          letterSpacing: 0.4,
-        }}
-      >
-        FLOOR MODE PREVIEW · mock data · later phase wires product.list
-      </div>
     </FShell>
   );
 }
 
-function velocityTone(v: string): "primary" | "sky" | "neutral" {
+function velocityTone(v: string | null): "primary" | "sky" | "neutral" {
   if (v === "A") return "primary";
   if (v === "B") return "sky";
   return "neutral";
