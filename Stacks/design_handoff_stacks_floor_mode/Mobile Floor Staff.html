@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stacks — Floor mode</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0B0907; font-family: 'Geist', -apple-system, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="brand.jsx"></script>
+<script type="text/babel" src="kit.jsx"></script>
+<script type="text/babel" src="mobile-screens.jsx"></script>
+<script type="text/babel" src="screens-c.jsx"></script>
+<script type="text/babel" src="web-c-shell.jsx"></script>
+<script type="text/babel" src="web-c-screens-1.jsx"></script>
+<script type="text/babel" src="web-c-screens-2.jsx"></script>
+
+<script type="text/babel">
+  const TWEAKS_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "showMobile": true,
+    "showWeb": true,
+    "accent": "#FFB23E"
+  }/*EDITMODE-END*/;
+
+  function Phone({ label, children }) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+        {children}
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
+      </div>
+    );
+  }
+
+  function App() {
+    const [tweaks, setTweak] = useTweaks(TWEAKS_DEFAULTS);
+    // mobile uses the existing dark theme; we override accent only
+    const mt = { ...themeFor('dark'), primary: tweaks.accent, primaryDeep: tweaks.accent };
+    // web uses the new floor theme; override accent
+    const wt = { ...floorTheme(), primary: tweaks.accent, primaryDeep: tweaks.accent, primarySoft: tweaks.accent === '#FFB23E' ? 'rgba(255,178,62,.12)' : `${tweaks.accent}22`, primaryGlow: `${tweaks.accent}59` };
+
+    return (
+      <>
+        <DesignCanvas
+          title="Stacks · Floor mode"
+          subtitle="One direction across mobile (floor staff) and web (manager ops). Dark, marigold-bold, scanner-first, glove-friendly."
+          background="#0B0907"
+        >
+          {tweaks.showWeb && (
+            <DCSection id="web" title="Web · Manager dashboard"
+              subtitle="What the manager sees on a desktop monitor in the warehouse office. Same visual DNA as mobile — bold mono numbers, marigold glow, dark canvas. Designed to feel like an ops center.">
+              <DCArtboard id="web-home"      label="Home · live ops"        width={1440} height={900}><WC_Home          t={wt} /></DCArtboard>
+              <DCArtboard id="web-ops"       label="Operations · today"     width={1440} height={1040}><WC_Operations   t={wt} /></DCArtboard>
+              <DCArtboard id="web-outl"      label="Outbound · list"        width={1440} height={900}><WC_OutboundList  t={wt} /></DCArtboard>
+              <DCArtboard id="web-outd"      label="Outbound · detail"      width={1440} height={1000}><WC_OutboundDetail t={wt} /></DCArtboard>
+              <DCArtboard id="web-inv"       label="Inventory · scan"       width={1440} height={900}><WC_Inventory     t={wt} /></DCArtboard>
+              <DCArtboard id="web-inbl"      label="Inbound · list"         width={1440} height={900}><WC_InboundList   t={wt} /></DCArtboard>
+              <DCArtboard id="web-inbd"      label="Inbound · detail"       width={1440} height={900}><WC_InboundDetail t={wt} /></DCArtboard>
+              <DCArtboard id="web-prod"      label="Products · catalog"     width={1440} height={820}><WC_Products      t={wt} /></DCArtboard>
+              <DCArtboard id="web-wh"        label="Warehouses · sites"     width={1440} height={900}><WC_Warehouses    t={wt} /></DCArtboard>
+              <DCArtboard id="web-cc"        label="Cycle counts"           width={1440} height={820}><WC_Counts        t={wt} /></DCArtboard>
+            </DCSection>
+          )}
+
+          {tweaks.showMobile && (
+            <DCSection id="mobile" title="Mobile · Floor staff"
+              subtitle="What floor staff carry. Huge hit targets for gloved hands, hardware-trigger scanner, action-first.">
+              <DCArtboard id="m-today"   label="Today · queue"       width={520} height={920}><Phone label="Today"><C_Today    t={mt} /></Phone></DCArtboard>
+              <DCArtboard id="m-scan"    label="Scan · camera"       width={520} height={920}><Phone label="Scan"><C_Scan      t={mt} /></Phone></DCArtboard>
+              <DCArtboard id="m-pick"    label="Pick run"            width={520} height={920}><Phone label="Pick"><C_Pick      t={mt} /></Phone></DCArtboard>
+              <DCArtboard id="m-recv"    label="Receive PO"          width={520} height={920}><Phone label="Receive"><C_Receive t={mt} /></Phone></DCArtboard>
+              <DCArtboard id="m-put"     label="Putaway · suggest"   width={520} height={920}><Phone label="Putaway"><C_Putaway t={mt} /></Phone></DCArtboard>
+            </DCSection>
+          )}
+        </DesignCanvas>
+
+        <TweaksPanel title="Tweaks">
+          <TweakSection title="Show">
+            <TweakToggle label="Web · manager dashboard" value={tweaks.showWeb}    onChange={(v) => setTweak('showWeb', v)} />
+            <TweakToggle label="Mobile · floor staff"    value={tweaks.showMobile} onChange={(v) => setTweak('showMobile', v)} />
+          </TweakSection>
+          <TweakSection title="Accent color">
+            <TweakColor label="Accent" value={tweaks.accent} onChange={(v) => setTweak('accent', v)} options={['#FFB23E', '#E88F10', '#FF6B5B', '#7BB4E8', '#7FD8A8']} />
+          </TweakSection>
+        </TweaksPanel>
+      </>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
