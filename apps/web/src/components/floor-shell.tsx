@@ -38,15 +38,18 @@ interface NavItem {
   badge?: number;
 }
 
+// Nav links route within the /floor preview tree so sidebar clicks
+// stay inside the new design. Each preview page is a thin re-skin of
+// the equivalent legacy /(dashboard) route.
 const NAV: NavItem[] = [
   { key: "home", label: "Home", href: "/floor" as Route, icon: Ic.Home },
-  { key: "operations", label: "Operations", href: "/reports" as Route, icon: Ic.Chart },
-  { key: "inbound", label: "Inbound", href: "/inbound" as Route, icon: Ic.Inbound },
-  { key: "outbound", label: "Outbound", href: "/outbound" as Route, icon: Ic.Outbound },
-  { key: "inventory", label: "Inventory", href: "/inventory" as Route, icon: Ic.Scan },
-  { key: "products", label: "Products", href: "/products" as Route, icon: Ic.Boxes },
-  { key: "warehouses", label: "Warehouses", href: "/warehouses" as Route, icon: Ic.Warehouse },
-  { key: "counts", label: "Cycle counts", href: "/inventory/counts" as Route, icon: Ic.Clipboard },
+  { key: "operations", label: "Operations", href: "/floor/operations" as Route, icon: Ic.Chart },
+  { key: "inbound", label: "Inbound", href: "/floor/inbound" as Route, icon: Ic.Inbound, badge: 8 },
+  { key: "outbound", label: "Outbound", href: "/floor/outbound" as Route, icon: Ic.Outbound, badge: 34 },
+  { key: "inventory", label: "Inventory", href: "/floor/inventory" as Route, icon: Ic.Scan },
+  { key: "products", label: "Products", href: "/floor/products" as Route, icon: Ic.Boxes },
+  { key: "warehouses", label: "Warehouses", href: "/floor/warehouses" as Route, icon: Ic.Warehouse },
+  { key: "counts", label: "Cycle counts", href: "/floor/counts" as Route, icon: Ic.Clipboard, badge: 4 },
 ];
 
 export interface FShellTab {
@@ -80,15 +83,13 @@ export function FShell({
   const t = ft;
   const pathname = usePathname() ?? "/";
   // Auto-detect active nav by longest-prefix match against the current
-  // pathname so /inbound/123 still highlights "Inbound". Falls back to
-  // "home" only for the literal /floor preview root.
+  // pathname so /floor/inbound/123 still highlights "Inbound". The
+  // "home" entry (/floor) has the shortest href, so by sorting
+  // longest-first it only matches when nothing more specific does.
   const autoActive =
     NAV.slice()
       .sort((a, b) => b.href.length - a.href.length)
-      .find(
-        (n) =>
-          (n.href as string) !== "/floor" && pathname.startsWith(n.href as string),
-      )?.key ?? (pathname === "/floor" || pathname === "/" ? "home" : undefined);
+      .find((n) => pathname.startsWith(n.href as string))?.key;
   const activeKey = active ?? autoActive;
 
   return (
