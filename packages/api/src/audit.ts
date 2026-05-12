@@ -3,8 +3,9 @@ import { schema } from "@wms/db";
 import type { Db } from "@wms/db";
 
 // Accept either a full Db or a transaction handle from `db.transaction(...)`.
-// Both expose `.select` and `.insert`; we don't need anything else here.
-type AuditDb = Pick<Db, "select" | "insert">;
+// Both expose `.select`, `.insert`, and `.transaction` (nested transactions
+// become SAVEPOINTs in pg), which is what we need below.
+type AuditDb = Pick<Db, "select" | "insert" | "transaction">;
 
 export interface AuditLogInput {
   organizationId: string;
@@ -26,7 +27,10 @@ export interface AuditLogInput {
  * the same RLS context as the mutation it records.
  *
  * Failures here MUST NOT roll back the caller's mutation — audit is
- * best-effort. We log to stderr and swallow.
+ * best-effort. The insert runs in its own (savepoint-backed) inner
+ * transaction so a failure — e.g. the audit_log table missing on an
+ * un-migrated database — rolls back only the savepoint, not the parent.
+ * The JS error is caught and logged to stderr.
  */
 export async function logAudit(db: AuditDb, input: AuditLogInput): Promise<void> {
   try {
@@ -39,7 +43,9 @@ export async function logAudit(db: AuditDb, input: AuditLogInput): Promise<void>
         .limit(1);
       userId = u?.id ?? null;
     }
-    await db.insert(schema.auditLog).values(buildAuditRow(input, userId));
+    await db.transaction(async (inner) => {
+      await inner.insert(schema.auditLog).values(buildAuditRow(input, userId));
+    });
   } catch (err) {
     console.error("[audit] failed to write audit_log row", input.action, err);
   }
