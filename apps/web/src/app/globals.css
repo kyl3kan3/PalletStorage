@@ -150,3 +150,35 @@ div {
   border-bottom-color: #e88f10 !important;
   outline: none;
 }
+
+/* Skeleton-row shimmer (kit.tsx::Skeleton). 1.4s loop runs a soft
+ * marigold-tinted highlight across each row while a query is fetching.
+ * `prefers-reduced-motion` halts the animation but keeps the surface
+ * visible so the page still shows a placeholder. */
+.kit-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.kit-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 178, 62, 0.08) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: kit-shimmer-move 1.4s linear infinite;
+}
+@keyframes kit-shimmer-move {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-shimmer::after {
+    animation: none;
+  }
+}
