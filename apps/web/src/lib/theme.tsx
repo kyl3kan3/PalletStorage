@@ -33,12 +33,23 @@ export const FONTS = {
   mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
 } as const;
 
+// Theme modes:
+//   - "light"  — original warm-cream direction (still the default while
+//                pages are migrated to floor mode page-by-page).
+//   - "dark"   — warm-cream's dark variant from the original brand.jsx.
+//   - "floor"  — Stacks "Floor mode": near-black dashboard, marigold-bold,
+//                scanner-first. Ported from
+//                Stacks/design_handoff_stacks_floor_mode/web-c-shell.jsx
+//                (floorTheme()). FBtn / FCard / FPill / KPI primitives
+//                are tuned for this mode but accept any Theme.
 export interface Theme {
-  mode: "light" | "dark";
+  mode: "light" | "dark" | "floor";
   bg: string;
   bgAlt: string;
   surface: string;
   surfaceAlt: string;
+  /** Lifted surface (e.g. active sidebar row, hover card). */
+  surfaceLift: string;
   border: string;
   borderStrong: string;
   ink: string;
@@ -49,6 +60,8 @@ export interface Theme {
   primaryText: string;
   primaryDeep: string;
   primarySoft: string;
+  /** Marigold glow used for primary-CTA box-shadow + active rail. */
+  primaryGlow: string;
   coral: string;
   coralSoft: string;
   mint: string;
@@ -60,7 +73,41 @@ export interface Theme {
   shadowLift: string;
 }
 
-export function themeFor(mode: "light" | "dark"): Theme {
+export function themeFor(mode: "light" | "dark" | "floor"): Theme {
+  if (mode === "floor") {
+    // ─── Stacks "Floor mode" ─────────────────────────────
+    // Source: Stacks/design_handoff_stacks_floor_mode/web-c-shell.jsx
+    // ::floorTheme(). Near-black operations-center palette with
+    // marigold accents and dramatic glow for active states.
+    return {
+      mode: "floor",
+      bg: "#0B0907",
+      bgAlt: "#0F0C0A",
+      surface: "rgba(255,255,255,.04)",
+      surfaceAlt: "rgba(255,255,255,.07)",
+      surfaceLift: "rgba(255,255,255,.06)",
+      border: "rgba(255,255,255,.08)",
+      borderStrong: "rgba(255,255,255,.16)",
+      ink: "#FBF5E9",
+      body: "#E8DFCF",
+      muted: "rgba(255,255,255,.55)",
+      mutedSoft: "rgba(255,255,255,.32)",
+      primary: palette.marigold,
+      primaryText: "#1F1308",
+      primaryDeep: palette.marigoldDeep,
+      primarySoft: "rgba(255,178,62,.12)",
+      primaryGlow: "rgba(255,178,62,.35)",
+      coral: palette.coral,
+      coralSoft: "rgba(255,107,91,.14)",
+      mint: palette.mint,
+      mintSoft: "rgba(127,216,168,.14)",
+      sky: palette.sky,
+      skySoft: "rgba(123,180,232,.14)",
+      lilac: palette.lilac,
+      shadow: "0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.4)",
+      shadowLift: "0 1px 0 rgba(255,255,255,.04), 0 14px 32px rgba(0,0,0,.5)",
+    };
+  }
   if (mode === "dark") {
     return {
       mode: "dark",
@@ -68,6 +115,7 @@ export function themeFor(mode: "light" | "dark"): Theme {
       bgAlt: "#221D19",
       surface: "#2B2520",
       surfaceAlt: "#352D27",
+      surfaceLift: "#3D342D",
       border: "rgba(255,255,255,.08)",
       borderStrong: "rgba(255,255,255,.14)",
       ink: "#FBF5E9",
@@ -78,6 +126,7 @@ export function themeFor(mode: "light" | "dark"): Theme {
       primaryText: "#1F1308",
       primaryDeep: palette.marigoldDeep,
       primarySoft: "rgba(255,178,62,.14)",
+      primaryGlow: "rgba(255,178,62,.3)",
       coral: palette.coral,
       coralSoft: "rgba(255,107,91,.14)",
       mint: palette.mint,
@@ -95,6 +144,7 @@ export function themeFor(mode: "light" | "dark"): Theme {
     bgAlt: palette.paper,
     surface: palette.snow,
     surfaceAlt: "#F3ECDD",
+    surfaceLift: "#FFFDF8",
     border: "rgba(31,26,23,.08)",
     borderStrong: "rgba(31,26,23,.16)",
     ink: palette.ink,
@@ -105,6 +155,7 @@ export function themeFor(mode: "light" | "dark"): Theme {
     primaryText: "#1F1308",
     primaryDeep: palette.marigoldDeep,
     primarySoft: "#FFEACC",
+    primaryGlow: "rgba(255,178,62,.25)",
     coral: palette.coral,
     coralSoft: "#FFDFDA",
     mint: palette.mint,
@@ -119,10 +170,16 @@ export function themeFor(mode: "light" | "dark"): Theme {
   };
 }
 
-// Single light theme for v1 — dark mode toggle is a follow-up.
+// Default theme for the existing UI is still light. Floor-mode pages
+// instantiate `themeFor("floor")` locally until the full migration lands.
 export const theme: Theme = themeFor("light");
 
-// ───────────────────────────── Cubby mascot ───────────────────────────
+// The floor theme is exported as a named constant so floor-mode pages
+// and the new FBtn/FCard/FPill/KPI primitives can pick it up without
+// re-deriving it on every render.
+export const floorTheme: Theme = themeFor("floor");
+
+// ──────────────────────────── Cubby mascot ───────────────────────
 export type CubbyMood = "happy" | "think" | "wow" | "sleep";
 
 export function Cubby({

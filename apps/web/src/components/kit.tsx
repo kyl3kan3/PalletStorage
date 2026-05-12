@@ -15,7 +15,7 @@ import { Ic, type IconProps } from "./icons";
 
 type Icon = (props: IconProps) => ReactNode;
 
-// ──────────────────────────── Button ───────────────────────
+// ───────────────────────── Button ───────────────────────
 export type BtnVariant = "primary" | "accent" | "secondary" | "ghost" | "danger";
 export type BtnSize = "sm" | "md" | "lg";
 
@@ -98,7 +98,7 @@ export function Btn({
   );
 }
 
-// ──────────────────────────── Card ─────────────────────────
+// ───────────────────────── Card ─────────────────────────
 export type CardTint = "primary" | "mint" | "coral" | "sky" | "alt";
 
 export interface CardProps {
@@ -154,7 +154,7 @@ export function Card({
   );
 }
 
-// ──────────────────────────── Tag ──────────────────────────
+// ───────────────────────── Tag ──────────────────────────
 export type TagTone = "primary" | "mint" | "coral" | "sky" | "neutral" | "ink";
 
 export function Tag({
@@ -200,7 +200,7 @@ export function Tag({
   );
 }
 
-// ──────────────────────────── SquircleIcon ───────────────────
+// ───────────────────────── SquircleIcon ───────────────────
 export type IconTint = "primary" | "mint" | "coral" | "sky" | "lilac" | "neutral";
 
 export function SquircleIcon({
@@ -247,7 +247,7 @@ export function SquircleIcon({
   );
 }
 
-// ──────────────────────────── StatBig ───────────────────────
+// ───────────────────────── StatBig ───────────────────────
 export function StatBig({
   t = defaultTheme,
   label,
@@ -302,7 +302,7 @@ export function StatBig({
   );
 }
 
-// ──────────────────────────── Ring ──────────────────────────
+// ───────────────────────── Ring ──────────────────────────
 export function Ring({
   t = defaultTheme,
   size = 64,
@@ -357,7 +357,7 @@ export function Ring({
   );
 }
 
-// ──────────────────────────── Tabs ──────────────────────────
+// ───────────────────────── Tabs ──────────────────────────
 export interface TabItem {
   key: string;
   label: string;
@@ -420,7 +420,7 @@ export function Tabs({
   );
 }
 
-// ──────────────────────────── TextField ─────────────────────
+// ───────────────────────── TextField ─────────────────────
 export function TextField({
   t = defaultTheme,
   style,
@@ -444,7 +444,7 @@ export function TextField({
   );
 }
 
-// ──────────────────────────── Search ────────────────────────
+// ───────────────────────── Search ────────────────────────
 export function Search({
   t = defaultTheme,
   value,
@@ -490,7 +490,328 @@ export function Search({
   );
 }
 
-// ──────────────────────────── PageTitle ──────────────────────
+// ══════════════════════════════════════════════════════════════════
+// Floor-mode primitives (FBtn / FCard / FPill / KPI)
+// ══════════════════════════════════════════════════════════════════
+// Ported from Stacks/design_handoff_stacks_floor_mode/web-c-shell.jsx.
+// These are tuned for the dark "floor" theme: marigold-bold, mono-
+// numbers, dramatic glow on primary CTAs. They accept any Theme so a
+// page can render in light or floor mode by swapping the `t` prop, but
+// they read most natural on the floor palette.
+//
+// API mirrors Btn / Card / Tag so callers can swap them in or out in
+// the same JSX shape:
+//   <FBtn t={ft} variant="primary" icon={Ic.Scan}>Open scanner</FBtn>
+//   <FCard t={ft} padding={20} accent>…</FCard>
+//   <FPill t={ft} tone="mint">Picking</FPill>
+
+export type FBtnVariant = "primary" | "ghost" | "light" | "danger";
+
+export interface FBtnProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "size"> {
+  t?: Theme;
+  variant?: FBtnVariant;
+  size?: BtnSize;
+  icon?: Icon;
+  full?: boolean;
+}
+
+const F_BTN_SIZES: Record<BtnSize, { padding: string; fontSize: number; iconSize: number }> = {
+  sm: { padding: "6px 12px", fontSize: 11.5, iconSize: 13 },
+  md: { padding: "10px 18px", fontSize: 13, iconSize: 15 },
+  lg: { padding: "14px 22px", fontSize: 15, iconSize: 17 },
+};
+
+export function FBtn({
+  t = defaultTheme,
+  variant = "primary",
+  size = "md",
+  icon,
+  children,
+  full,
+  style,
+  ...rest
+}: FBtnProps) {
+  const sz = F_BTN_SIZES[size];
+  const variants: Record<FBtnVariant, { bg: string; fg: string; border: string; shadow: string }> = {
+    primary: {
+      bg: t.primary,
+      fg: t.primaryText,
+      border: t.primary,
+      shadow: `0 8px 22px ${t.primaryGlow}, inset 0 -2px 0 rgba(0,0,0,.15)`,
+    },
+    ghost: {
+      bg: "transparent",
+      fg: t.ink,
+      border: t.borderStrong,
+      shadow: "none",
+    },
+    // "light" is the white inverted button used for "SCAN TO CONFIRM"
+    // on mobile and the equivalent moments on web (rare).
+    light: {
+      bg: "#fff",
+      fg: "#0F0C0A",
+      border: "#fff",
+      shadow: "inset 0 -2px 0 rgba(0,0,0,.1)",
+    },
+    danger: {
+      bg: t.coralSoft,
+      fg: t.coral,
+      border: "rgba(255,107,91,.35)",
+      shadow: "none",
+    },
+  };
+  const v = variants[variant];
+  const Icon = icon;
+  return (
+    <button
+      {...rest}
+      data-btn-size={size}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: sz.padding,
+        fontSize: sz.fontSize,
+        fontFamily: FONTS.sans,
+        fontWeight: 700,
+        letterSpacing: -0.1,
+        background: v.bg,
+        color: v.fg,
+        border: `1.5px solid ${v.border}`,
+        borderRadius: 12,
+        boxShadow: v.shadow,
+        width: full ? "100%" : undefined,
+        justifyContent: full ? "center" : undefined,
+        cursor: rest.disabled ? "not-allowed" : "pointer",
+        opacity: rest.disabled ? 0.5 : 1,
+        transition: "transform .08s, box-shadow .12s",
+        ...(style || {}),
+      }}
+    >
+      {Icon ? <Icon size={sz.iconSize} /> : null}
+      {children}
+    </button>
+  );
+}
+
+export interface FCardProps {
+  t?: Theme;
+  children: ReactNode;
+  padding?: number;
+  /** When true, adds a 2px marigold top-border accent — used for hot
+   *  cards (over-utilized warehouse, active dock door, etc.). */
+  accent?: boolean;
+  style?: CSSProperties;
+  onClick?: () => void;
+}
+
+export function FCard({
+  t = defaultTheme,
+  children,
+  padding = 18,
+  accent,
+  style,
+  onClick,
+}: FCardProps) {
+  return (
+    <div
+      onClick={onClick}
+      data-card=""
+      data-card-flush={padding === 0 ? "" : undefined}
+      style={{
+        background: t.surface,
+        border: `1px solid ${t.border}`,
+        borderRadius: 18,
+        padding,
+        boxShadow: t.shadow,
+        position: "relative",
+        ...(accent ? { borderTop: `2px solid ${t.primary}` } : {}),
+        cursor: onClick ? "pointer" : undefined,
+        ...(style || {}),
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export type FPillTone = "primary" | "mint" | "coral" | "sky" | "neutral" | "lilac";
+export type FPillSize = "sm" | "md";
+
+export function FPill({
+  t = defaultTheme,
+  tone = "neutral",
+  size = "md",
+  children,
+  style,
+}: {
+  t?: Theme;
+  tone?: FPillTone;
+  size?: FPillSize;
+  children: ReactNode;
+  style?: CSSProperties;
+}) {
+  const map: Record<FPillTone, { bg: string; fg: string; border: string }> = {
+    primary: { bg: t.primarySoft, fg: t.primary, border: "rgba(255,178,62,.35)" },
+    mint: { bg: t.mintSoft, fg: t.mint, border: "rgba(127,216,168,.35)" },
+    coral: { bg: t.coralSoft, fg: t.coral, border: "rgba(255,107,91,.4)" },
+    sky: { bg: t.skySoft, fg: t.sky, border: "rgba(123,180,232,.35)" },
+    neutral: { bg: t.surface, fg: t.muted, border: t.border },
+    lilac: { bg: "rgba(201,184,240,.14)", fg: t.lilac, border: "rgba(201,184,240,.3)" },
+  };
+  const m = map[tone];
+  const sz = size === "sm" ? { px: 7, py: 2, fs: 10 } : { px: 10, py: 4, fs: 11 };
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: `${sz.py}px ${sz.px}px`,
+        borderRadius: 999,
+        background: m.bg,
+        color: m.fg,
+        border: `1px solid ${m.border}`,
+        fontFamily: FONTS.mono,
+        fontSize: sz.fs,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+        ...(style || {}),
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Big KPI tile with mono headline number, optional suffix, delta, and
+ * an 8-bar inline sparkline. Used in the Home and Operations KPI rows
+ * (Received 284 / Shipped 412 / Dock-to-stock 47 min / On-time 96%).
+ *
+ *   <KPI t={ft} label="Received" value={284} delta="+8%" spark={[…]} />
+ *
+ * Spark bars are heights in percent (0–100). The last bar lights up in
+ * marigold to mark the current period; earlier bars stay muted white.
+ */
+export function KPI({
+  t = defaultTheme,
+  label,
+  value,
+  suffix,
+  delta,
+  deltaTone = "mint",
+  spark,
+  accent,
+  style,
+}: {
+  t?: Theme;
+  label: string;
+  value: string | number;
+  suffix?: string;
+  delta?: string;
+  deltaTone?: "mint" | "coral";
+  /** Heights in % (0–100), one per bar. ~8 bars looks balanced. */
+  spark?: number[];
+  /** Marigold top-border, like FCard's accent. */
+  accent?: boolean;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      style={{
+        background: t.surface,
+        border: `1px solid ${t.border}`,
+        borderRadius: 16,
+        padding: 18,
+        position: "relative",
+        overflow: "hidden",
+        borderTop: accent ? `2px solid ${t.primary}` : `1px solid ${t.border}`,
+        ...(style || {}),
+      }}
+    >
+      <div
+        style={{
+          fontFamily: FONTS.mono,
+          fontSize: 10.5,
+          fontWeight: 700,
+          color: t.muted,
+          letterSpacing: 0.8,
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 8 }}>
+        <span
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 40,
+            fontWeight: 800,
+            color: t.ink,
+            letterSpacing: -1,
+            lineHeight: 1,
+          }}
+        >
+          {value}
+        </span>
+        {suffix && (
+          <span
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 14,
+              fontWeight: 600,
+              color: t.muted,
+            }}
+          >
+            {suffix}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+        {delta && (
+          <span
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              fontWeight: 800,
+              color: deltaTone === "coral" ? t.coral : t.mint,
+            }}
+          >
+            {delta}
+          </span>
+        )}
+        {spark && spark.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              gap: 2,
+              flex: 1,
+              height: 18,
+              marginLeft: "auto",
+            }}
+          >
+            {spark.map((h, i) => (
+              <div
+                key={i}
+                style={{
+                  width: 4,
+                  height: `${Math.max(0, Math.min(100, h))}%`,
+                  background: i === spark.length - 1 ? t.primary : "rgba(255,255,255,.18)",
+                  borderRadius: 1,
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── PageTitle ──────────────────────
 export function PageTitle({
   t = defaultTheme,
   eyebrow,
