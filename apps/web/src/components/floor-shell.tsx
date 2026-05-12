@@ -7,14 +7,15 @@ import type { ReactNode } from "react";
 import { floorTheme as ft, FONTS, Cubby } from "~/lib/theme";
 import { FBtn, FPill } from "./kit";
 import { Ic, type IconProps } from "./icons";
+import { useCmdK } from "./cmdk-palette";
 
 /**
  * FShell — the floor-mode dashboard chrome.
  *
  * Ported from Stacks/design_handoff_stacks_floor_mode/web-c-shell.jsx
  * (FShell). Sidebar with marigold-glow active rail, dark top bar with
- * the search slot (Cmd+K palette wired separately), page title area,
- * and the children content area below.
+ * the search slot (opens the Cmd+K palette), page title area, and the
+ * children content area below.
  *
  * The page title block is opt-in: pass `title` (and optionally
  * `eyebrow`, `subtitle`, `tabs`, `actions`) and FShell renders it
@@ -258,46 +259,10 @@ export function FShell({
             zIndex: 2,
           }}
         >
-          {/* Search field — Cmd+K palette wires in a later phase */}
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "9px 14px",
-              borderRadius: 12,
-              background: t.surface,
-              border: `1px solid ${t.border}`,
-              width: 360,
-              color: t.muted,
-              cursor: "text",
-            }}
-          >
-            <Ic.Search size={14} color={t.muted} />
-            <span
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                letterSpacing: 0.2,
-              }}
-            >
-              P-… · SO-… · SKU-… · A2-02-B
-            </span>
-            <span
-              style={{
-                marginLeft: "auto",
-                fontFamily: FONTS.mono,
-                fontSize: 10,
-                color: t.mutedSoft,
-                padding: "2px 6px",
-                borderRadius: 4,
-                background: t.surface,
-                border: `1px solid ${t.border}`,
-              }}
-            >
-              ⌘ K
-            </span>
-          </div>
+          {/* Search slot — clicking it (or hitting ⌘K anywhere) opens
+              the command palette. Looks like an input but isn't —
+              keeps the real text-entry to a focus-trapped overlay. */}
+          <SearchSlot />
 
           <div style={{ flex: 1 }} />
 
@@ -498,6 +463,62 @@ function FloorLiveStatus() {
       </div>
       <ShiftClock />
     </div>
+  );
+}
+
+/**
+ * Top-bar search slot. Visually a search input, functionally a button
+ * that opens the Cmd+K palette. Keeps the live text entry inside the
+ * palette (where focus management + keyboard navigation already live)
+ * instead of having two places that accept typed input.
+ */
+function SearchSlot() {
+  const t = ft;
+  const { open } = useCmdK();
+  return (
+    <button
+      type="button"
+      onClick={open}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "9px 14px",
+        borderRadius: 12,
+        background: t.surface,
+        border: `1px solid ${t.border}`,
+        width: 360,
+        color: t.muted,
+        cursor: "pointer",
+        textAlign: "left",
+        fontFamily: FONTS.sans,
+      }}
+    >
+      <Ic.Search size={14} color={t.muted} />
+      <span
+        style={{
+          fontFamily: FONTS.mono,
+          fontSize: 12,
+          letterSpacing: 0.2,
+          flex: 1,
+        }}
+      >
+        P-… · SO-… · SKU-… · A2-02-B
+      </span>
+      <span
+        style={{
+          fontFamily: FONTS.mono,
+          fontSize: 10,
+          color: t.mutedSoft,
+          padding: "2px 6px",
+          borderRadius: 4,
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+        }}
+      >
+        ⌘ K
+      </span>
+    </button>
   );
 }
 

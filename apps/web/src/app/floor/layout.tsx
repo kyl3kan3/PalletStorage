@@ -1,4 +1,4 @@
-import { FShell } from "~/components/floor-shell";
+import { CmdKProvider } from "~/components/cmdk-palette";
 
 /**
  * /floor — preview tree for the "Floor mode" redesign (Phase 2).
@@ -9,11 +9,15 @@ import { FShell } from "~/components/floor-shell";
  * off, a later phase folds these routes into the canonical paths and
  * retires the dashboard layout.
  *
+ * Wraps every floor route in <CmdKProvider> so the ⌘K palette is
+ * available globally; FShell's top-bar search slot opens it via
+ * useCmdK().
+ *
  * Pages inside /floor set their own page-title block by rendering
  * <FShell title=… eyebrow=… > themselves, so individual pages have
  * control over tabs / actions without having to plumb them through
  * the layout.
  */
 export default function FloorLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <CmdKProvider>{children}</CmdKProvider>;
 }
