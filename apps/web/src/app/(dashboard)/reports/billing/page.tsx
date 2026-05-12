@@ -8,6 +8,10 @@ import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
 import { useIsManager } from "~/lib/useRole";
+import {
+  BillPreviewModal,
+  type BillPreviewInput,
+} from "~/components/bill-preview-modal";
 
 type StorageBasis = "peak" | "average" | "pallet_days";
 
@@ -107,6 +111,12 @@ export default function BillingReportPage() {
   const [overrides, setOverrides] = useState<Record<string, RowOverrides>>({});
   const [downloadingFor, setDownloadingFor] = useState<string | null>(null);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
+  // Currently-previewing row. Holds enough to render the bill modal +
+  // re-route Download/Push actions back through the existing flow.
+  const [previewing, setPreviewing] = useState<{
+    customerId: string;
+    customerName: string;
+  } | null>(null);
 
   function basisDisplay(row: { peakCount: number; averageCount: number; palletDays: number }, basis: StorageBasis) {
     if (basis === "peak") return `${row.peakCount}`;
@@ -450,6 +460,21 @@ export default function BillingReportPage() {
                     <Btn
                       t={t}
                       type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={Ic.Eye}
+                      onClick={() =>
+                        setPreviewing({
+                          customerId: r.customerId,
+                          customerName: r.customerName,
+                        })
+                      }
+                    >
+                      Preview
+                    </Btn>
+                    <Btn
+                      t={t}
+                      type="button"
                       variant="secondary"
                       size="sm"
                       icon={Ic.Download}
@@ -526,6 +551,48 @@ export default function BillingReportPage() {
           </div>
         )}
       </div>
+
+      {(() => {
+        if (!previewing) return null;
+        const o = getRowOverrides(previewing.customerId);
+        const payload = buildBillPayload(previewing.customerId);
+        const previewInput: BillPreviewInput = {
+          customerId: previewing.customerId,
+          customerName: previewing.customerName,
+          from,
+          to,
+          storageBasis: o.storageBasis,
+          overrides: payload.overrides,
+          extraLines: payload.extraLines,
+          memo: payload.memo,
+          dueInDays: payload.dueInDays,
+        };
+        const row = (billing.data?.rows ?? []).find(
+          (r) => r.customerId === previewing.customerId,
+        );
+        const cantQb =
+          !isManager ||
+          (!row?.hasRates && !o.storageRateDollars);
+        const exportedQboId = exportedFor[previewing.customerId];
+        return (
+          <BillPreviewModal
+            open
+            onClose={() => setPreviewing(null)}
+            input={previewInput}
+            onDownload={() =>
+              downloadBill(previewing.customerId, previewing.customerName)
+            }
+            onPushQb={() => pushToQb(previewing.customerId)}
+            downloadDisabled={downloadingFor === previewing.customerId}
+            downloadPending={downloadingFor === previewing.customerId}
+            pushQbDisabled={cantQb || exportToQb.isPending}
+            pushQbPending={exportToQb.isPending}
+            pushQbLabel={
+              exportedQboId ? `Pushed (Inv ${exportedQboId})` : undefined
+            }
+          />
+        );
+      })()}
     </div>
   );
 }

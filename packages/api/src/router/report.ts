@@ -483,6 +483,187 @@ export const reportRouter = router({
     }),
 
   /**
+   * Build the bill the customer will see — same numbers, same rounding,
+   * same line ordering as the PDF route and the QuickBooks export, but
+   * returned as structured data so the UI can render it inline before
+   * anyone hits "download" or "push to QB". Pure read; no side effects,
+   * no writes to QuickBooks, no PDF generation.
+   *
+   * Mirrors the input shape of exportCustomerBillToQuickbooks so the
+   * UI can pass the same payload to either endpoint.
+   */
+  previewCustomerBill: tenantProcedure
+    .input(
+      z.object({
+        customerId: z.string().uuid(),
+        from: z.date(),
+        to: z.date(),
+        storageBasis: z
+          .enum(["peak", "average", "pallet_days"])
+          .optional(),
+        overrides: z
+          .object({
+            storageRateCentsPerPalletMonth: z.number().int().min(0).optional(),
+            receiveRateCentsPerPallet: z.number().int().min(0).optional(),
+            shipRateCentsPerPallet: z.number().int().min(0).optional(),
+          })
+          .optional(),
+        extraLines: z
+          .array(
+            z.object({
+              description: z.string().trim().min(1).max(200),
+              amountCents: z.number().int(),
+            }),
+          )
+          .max(20)
+          .optional(),
+        memo: z.string().trim().max(1000).optional(),
+        dueInDays: z.number().int().min(0).max(365).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const basis = input.storageBasis ?? "peak";
+      const rows = await computeBillingPeriod(
+        ctx.db,
+        orgId,
+        input.customerId,
+        input.from,
+        input.to,
+        { storageBasis: basis },
+      );
+      const row = rows[0];
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+      }
+      const charges = applyRatesToRow(row, basis, input.overrides);
+      const extras = (input.extraLines ?? []).filter(
+        (l) => l.amountCents !== 0 && l.description.trim(),
+      );
+      const extrasTotal = extras.reduce((n, l) => n + l.amountCents, 0);
+
+      const basisLabel =
+        basis === "peak"
+          ? "peak in period"
+          : basis === "average"
+            ? "average over period"
+            : "pallet-days";
+      const storageQty =
+        basis === "peak"
+          ? `${row.peakCount}`
+          : basis === "average"
+            ? row.averageCount.toFixed(2)
+            : row.palletDays.toFixed(2);
+
+      // Build the same line items the PDF renders, in the same order.
+      // Lines with a zero rate are omitted (the PDF does the same).
+      const lines: Array<{
+        description: string;
+        qty: string;
+        rateCents: number;
+        amountCents: number;
+        unit: string;
+      }> = [];
+      if (charges.storageRate > 0) {
+        lines.push({
+          description: `Pallet storage — ${basisLabel}`,
+          qty: storageQty,
+          rateCents: charges.storageRate,
+          amountCents: charges.storageCharge,
+          unit: "/pallet/mo",
+        });
+      }
+      if (charges.receiveRate > 0) {
+        lines.push({
+          description: "Inbound handling",
+          qty: `${row.receives}`,
+          rateCents: charges.receiveRate,
+          amountCents: charges.receiveCharge,
+          unit: "/pallet",
+        });
+      }
+      if (charges.shipRate > 0) {
+        lines.push({
+          description: "Outbound handling",
+          qty: `${row.ships}`,
+          rateCents: charges.shipRate,
+          amountCents: charges.shipCharge,
+          unit: "/pallet",
+        });
+      }
+
+      const [customer] = await ctx.db
+        .select({
+          id: schema.customers.id,
+          name: schema.customers.name,
+          billingLine1: schema.customers.billingLine1,
+          billingLine2: schema.customers.billingLine2,
+          billingCity: schema.customers.billingCity,
+          billingRegion: schema.customers.billingRegion,
+          billingPostalCode: schema.customers.billingPostalCode,
+          billingCountry: schema.customers.billingCountry,
+        })
+        .from(schema.customers)
+        .where(
+          and(
+            eq(schema.customers.id, input.customerId),
+            eq(schema.customers.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+
+      const [organization] = await ctx.db
+        .select({
+          name: schema.organizations.name,
+          legalName: schema.organizations.legalName,
+          addressLine1: schema.organizations.addressLine1,
+          addressLine2: schema.organizations.addressLine2,
+          city: schema.organizations.city,
+          region: schema.organizations.region,
+          postalCode: schema.organizations.postalCode,
+          country: schema.organizations.country,
+        })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.id, orgId))
+        .limit(1);
+
+      const dueDate =
+        input.dueInDays != null
+          ? new Date(Date.now() + input.dueInDays * 86_400_000)
+          : null;
+      const period = `${input.from.getUTCFullYear()}-${String(
+        input.from.getUTCMonth() + 1,
+      ).padStart(2, "0")}`;
+
+      return {
+        customer: customer ?? null,
+        organization: organization ?? null,
+        period,
+        from: input.from,
+        to: input.to,
+        storageBasis: basis,
+        storageBasisLabel: basisLabel,
+        lines,
+        extraLines: extras,
+        subtotalChargesCents: charges.total,
+        extrasTotalCents: extrasTotal,
+        grandTotalCents: charges.total + extrasTotal,
+        dueDate,
+        memo: input.memo?.trim() || null,
+        hasRates: row.hasRates,
+        counts: {
+          opening: row.openingCount,
+          current: row.currentCount,
+          peak: row.peakCount,
+          average: row.averageCount,
+          palletDays: row.palletDays,
+          receives: row.receives,
+          ships: row.ships,
+        },
+      };
+    }),
+
+  /**
    * Push a single customer's bill into QuickBooks as an Invoice.
    * Accepts optional per-bill rate overrides, a different storage
    * basis, ad-hoc extra lines, a memo, and a Net-N due-date offset —
