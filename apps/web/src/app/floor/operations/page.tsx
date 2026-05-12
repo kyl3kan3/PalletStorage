@@ -1,82 +1,81 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill, KPI, LiveAgo } from "~/components/kit";
+import { FCard, FBtn, FPill, KPI, LiveAgo, Skeleton, EmptyState } from "~/components/kit";
 import { floorTheme as t, FONTS } from "~/lib/theme";
-import { Ic } from "~/components/icons";
+import { trpc } from "~/lib/trpc";
 
 /**
- * Floor-mode Operations preview at /floor/operations.
+ * Floor-mode Operations dashboard at /floor/operations. Wires:
+ *   - KPI row → report.summary
+ *   - Throughput chart → report.throughput (movements grouped by day)
+ *   - Dock-to-stock ring → report.dockToStock
+ *   - Top stock → report.stockOnHand
+ *   - Movement ledger → movement.recent
  *
- * Rolled-up KPIs + ledger for the manager. Layout from the handoff:
- *   - KPI row (4): Pallets stored / Open inbound / Picking / Moves 24h
- *   - Throughput chart (66%): 12-hour in/out bars, current hour glows
- *   - Dock-to-stock ring (33%): SVG ring + p50 / p95 / Δ-week stacked
- *   - Top stock table (55%): top SKUs by on-hand
- *   - Movement ledger (45%): live activity feed with colored dots
- *
- * Mock data only; later phase wires ops.kpis / ops.throughput /
- * ops.dockToStock / ops.topStock / movement.recent.
+ * All queries refetch every 30s so the dashboard stays close to live.
  */
-
-// 12 hourly buckets, [inCount, outCount] per hour. Current hour is the
-// last entry (index 11).
-const HOURS: Array<{ hour: string; inCount: number; outCount: number }> = [
-  { hour: "06", inCount: 8, outCount: 5 },
-  { hour: "07", inCount: 12, outCount: 9 },
-  { hour: "08", inCount: 18, outCount: 14 },
-  { hour: "09", inCount: 22, outCount: 19 },
-  { hour: "10", inCount: 28, outCount: 24 },
-  { hour: "11", inCount: 31, outCount: 26 },
-  { hour: "12", inCount: 24, outCount: 30 },
-  { hour: "13", inCount: 26, outCount: 32 },
-  { hour: "14", inCount: 30, outCount: 38 },
-  { hour: "15", inCount: 22, outCount: 34 },
-  { hour: "16", inCount: 18, outCount: 28 },
-  { hour: "17", inCount: 12, outCount: 22 },
-];
-
-const KPIS = [
-  { label: "Pallets stored", value: "8,420", delta: "+126 wk", spark: [55, 60, 58, 65, 62, 70, 72, 78] },
-  { label: "Open inbound", value: 14, delta: "−3 today", deltaTone: "mint" as const, spark: [60, 70, 65, 75, 60, 55, 50, 40] },
-  { label: "Picking", value: 12, delta: "+4 hr", spark: [40, 45, 50, 55, 60, 70, 75, 80] },
-  { label: "Moves / 24h", value: 1284, delta: "+9%", spark: [50, 55, 60, 65, 70, 75, 82, 90] },
-];
-
-const TOP_STOCK = [
-  { sku: "SKU-00041", name: "Vanilla Extract 8oz", pallets: 24, onHand: "2,880 ea" },
-  { sku: "SKU-00102", name: "Cane Sugar 50lb", pallets: 18, onHand: "1,440 cs" },
-  { sku: "SKU-00038", name: "Coffee Beans 5lb", pallets: 15, onHand: "1,200 cs" },
-  { sku: "SKU-00211", name: "Whole Tomatoes #10", pallets: 12, onHand: "1,008 cs" },
-];
-
-const LEDGER = [
-  { reason: "PICK", color: "primary", text: "MR picked 12 ea of Vanilla 8oz for SO-24881", ago: "00:42" },
-  { reason: "RECV", color: "sky", text: "JN received pallet P-9QK4X72L · 40 cs Sugar", ago: "01:08" },
-  { reason: "PUTAWAY", color: "lilac", text: "AS putaway P-7H82MR3K → A2-04-B", ago: "02:15" },
-  { reason: "ADJUST", color: "coral", text: "KT adjusted P-3MN91X22 qty 24 → 22", ago: "03:50" },
-  { reason: "SHIP", color: "mint", text: "Truck departed Dock D-02 · SO-24879 closed", ago: "06:12" },
-  { reason: "PICK", color: "primary", text: "AS picked 4 cs of Coffee Beans for SO-24882", ago: "07:55" },
-  { reason: "RECV", color: "sky", text: "JN received pallet P-2L4Z88PR · 36 cs Tomatoes", ago: "09:30" },
-] as const;
 
 export default function FloorOperationsPreview() {
   const [tab, setTab] = useState<"in" | "out" | "both">("both");
-  const maxBar = Math.max(...HOURS.flatMap((h) => [h.inCount, h.outCount]));
+
+  const summary = trpc.report.summary.useQuery(undefined, { refetchInterval: 30_000 });
+  const throughput = trpc.report.throughput.useQuery(
+    { days: 12 },
+    { refetchInterval: 30_000 },
+  );
+  const dockToStock = trpc.report.dockToStock.useQuery(
+    { days: 7 },
+    { refetchInterval: 30_000 },
+  );
+  const topStock = trpc.report.stockOnHand.useQuery(
+    { limit: 4 },
+    { refetchInterval: 30_000 },
+  );
+  const ledger = trpc.movement.recent.useQuery(
+    { limit: 7 },
+    { refetchInterval: 30_000 },
+  );
+
+  // Throughput rows come back as { day, reason, n } per day-reason combo.
+  // Bucket into hours-ish (we got days back since that's what throughput
+  // currently aggregates) and split in/out for the chart.
+  const chart = useMemo(() => {
+    const rows = throughput.data ?? [];
+    const byDay = new Map<string, { in: number; out: number }>();
+    for (const r of rows) {
+      const day = String(r.day ?? "").slice(0, 10);
+      const reason = String(r.reason ?? "");
+      const n = Number(r.n ?? 0);
+      const slot = byDay.get(day) ?? { in: 0, out: 0 };
+      if (reason === "receive") slot.in += n;
+      else if (reason === "ship" || reason === "pick") slot.out += n;
+      byDay.set(day, slot);
+    }
+    // Last 12 days, oldest first.
+    const sorted = Array.from(byDay.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    return sorted.map(([day, v]) => ({ label: day.slice(5), ...v }));
+  }, [throughput.data]);
+
+  const maxBar = useMemo(
+    () => Math.max(1, ...chart.flatMap((c) => [c.in, c.out])),
+    [chart],
+  );
 
   return (
     <FShell
-      active="operations"
       eyebrow="Live operations"
       title="Operations"
       subtitle={
         <span>
-          WH-01 · TACOMA · <LiveAgo t={t} prefix="updated" />
+          Live · <LiveAgo t={t} prefix="updated" />
         </span>
       }
     >
-      {/* ─── KPI row ─────────────────────────────────────────────── */}
+      {/* KPI row */}
       <div
         style={{
           display: "grid",
@@ -85,20 +84,28 @@ export default function FloorOperationsPreview() {
           marginBottom: 16,
         }}
       >
-        {KPIS.map((k) => (
-          <KPI
-            key={k.label}
-            t={t}
-            label={k.label}
-            value={k.value}
-            delta={k.delta}
-            deltaTone={k.deltaTone}
-            spark={k.spark}
-          />
-        ))}
+        {summary.isLoading || !summary.data ? (
+          <>
+            <Skeleton t={t} lines={1} rowHeight={120} />
+            <Skeleton t={t} lines={1} rowHeight={120} />
+            <Skeleton t={t} lines={1} rowHeight={120} />
+            <Skeleton t={t} lines={1} rowHeight={120} />
+          </>
+        ) : (
+          <>
+            <KPI
+              t={t}
+              label="Pallets stored"
+              value={summary.data.storedPallets.toLocaleString()}
+            />
+            <KPI t={t} label="Open inbound" value={summary.data.openInbound} />
+            <KPI t={t} label="Picking" value={summary.data.outboundPicking} />
+            <KPI t={t} label="Moves / 24h" value={summary.data.movements24h} />
+          </>
+        )}
       </div>
 
-      {/* ─── Throughput chart + Dock-to-stock ring ────────────────── */}
+      {/* Throughput chart + Dock-to-stock ring */}
       <div
         style={{
           display: "grid",
@@ -126,7 +133,7 @@ export default function FloorOperationsPreview() {
                   letterSpacing: -0.3,
                 }}
               >
-                Throughput · last 12 hours
+                Throughput · last 12 days
               </div>
               <div
                 style={{
@@ -138,7 +145,7 @@ export default function FloorOperationsPreview() {
                   marginTop: 4,
                 }}
               >
-                In / Out movements grouped by hour
+                Receives vs picks/ships
               </div>
             </div>
             <div
@@ -176,122 +183,79 @@ export default function FloorOperationsPreview() {
             </div>
           </div>
 
-          {/* Bar chart */}
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 200 }}>
-            {HOURS.map((h, i) => {
-              const isCurrent = i === HOURS.length - 1;
-              const inH = (h.inCount / maxBar) * 100;
-              const outH = (h.outCount / maxBar) * 100;
-              const showIn = tab !== "out";
-              const showOut = tab !== "in";
-              return (
-                <div
-                  key={h.hour}
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 6,
-                    minWidth: 0,
-                  }}
-                >
+          {throughput.isLoading ? (
+            <Skeleton t={t} lines={1} rowHeight={200} />
+          ) : chart.length === 0 ? (
+            <EmptyState t={t} title="No movements in the last 12 days" />
+          ) : (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 200 }}>
+              {chart.map((c, i) => {
+                const isCurrent = i === chart.length - 1;
+                const inH = (c.in / maxBar) * 100;
+                const outH = (c.out / maxBar) * 100;
+                const showIn = tab !== "out";
+                const showOut = tab !== "in";
+                return (
                   <div
+                    key={c.label}
                     style={{
+                      flex: 1,
                       display: "flex",
-                      gap: 2,
-                      alignItems: "flex-end",
-                      width: "100%",
-                      height: 170,
-                      justifyContent: "center",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 6,
+                      minWidth: 0,
                     }}
                   >
-                    {showIn && (
-                      <div
-                        style={{
-                          width: 10,
-                          height: `${inH}%`,
-                          background: isCurrent ? t.primary : "rgba(123,180,232,.7)",
-                          borderRadius: 2,
-                          boxShadow: isCurrent ? `0 0 12px ${t.primaryGlow}` : undefined,
-                        }}
-                      />
-                    )}
-                    {showOut && (
-                      <div
-                        style={{
-                          width: 10,
-                          height: `${outH}%`,
-                          background: isCurrent ? t.primary : "rgba(127,216,168,.7)",
-                          borderRadius: 2,
-                          boxShadow: isCurrent ? `0 0 12px ${t.primaryGlow}` : undefined,
-                        }}
-                      />
-                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 2,
+                        alignItems: "flex-end",
+                        width: "100%",
+                        height: 170,
+                        justifyContent: "center",
+                      }}
+                    >
+                      {showIn && (
+                        <div
+                          style={{
+                            width: 10,
+                            height: `${inH}%`,
+                            background: isCurrent ? t.primary : "rgba(123,180,232,.7)",
+                            borderRadius: 2,
+                            boxShadow: isCurrent ? `0 0 12px ${t.primaryGlow}` : undefined,
+                          }}
+                        />
+                      )}
+                      {showOut && (
+                        <div
+                          style={{
+                            width: 10,
+                            height: `${outH}%`,
+                            background: isCurrent ? t.primary : "rgba(127,216,168,.7)",
+                            borderRadius: 2,
+                            boxShadow: isCurrent ? `0 0 12px ${t.primaryGlow}` : undefined,
+                          }}
+                        />
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: FONTS.mono,
+                        fontSize: 10,
+                        color: isCurrent ? t.primary : t.mutedSoft,
+                        fontWeight: isCurrent ? 800 : 500,
+                        letterSpacing: 0.4,
+                      }}
+                    >
+                      {c.label}
+                    </div>
                   </div>
-                  <div
-                    style={{
-                      fontFamily: FONTS.mono,
-                      fontSize: 10,
-                      color: isCurrent ? t.primary : t.mutedSoft,
-                      fontWeight: isCurrent ? 800 : 500,
-                      letterSpacing: 0.4,
-                    }}
-                  >
-                    {h.hour}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* Legend */}
-          <div
-            style={{
-              display: "flex",
-              gap: 18,
-              marginTop: 12,
-              fontFamily: FONTS.mono,
-              fontSize: 10.5,
-              color: t.muted,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-            }}
-          >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "rgba(123,180,232,.7)",
-                  borderRadius: 2,
-                }}
-              />
-              In
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: "rgba(127,216,168,.7)",
-                  borderRadius: 2,
-                }}
-              />
-              Out
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: t.primary,
-                  borderRadius: 2,
-                  boxShadow: `0 0 6px ${t.primaryGlow}`,
-                }}
-              />
-              Current hour
-            </span>
-          </div>
+                );
+              })}
+            </div>
+          )}
         </FCard>
 
         {/* Dock-to-stock ring */}
@@ -320,18 +284,41 @@ export default function FloorOperationsPreview() {
           >
             Last 7 days
           </div>
-          <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
-            <DockToStockRing value={0.78} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-              <RingStat label="P50" value="38 min" />
-              <RingStat label="P95" value="92 min" />
-              <RingStat label="Δ week" value="−6 min" delta="mint" />
+          {dockToStock.isLoading || !dockToStock.data ? (
+            <Skeleton t={t} lines={1} rowHeight={140} />
+          ) : dockToStock.data.n === 0 ? (
+            <EmptyState
+              t={t}
+              title="No matched receives"
+              hint="Need at least one pallet received + putaway in the last 7 days."
+            />
+          ) : (
+            <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+              <DockToStockRing value={dockToStock.data.avg_seconds} />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  flex: 1,
+                }}
+              >
+                <RingStat
+                  label="P50"
+                  value={fmtSeconds(dockToStock.data.p50_seconds)}
+                />
+                <RingStat
+                  label="P95"
+                  value={fmtSeconds(dockToStock.data.p95_seconds)}
+                />
+                <RingStat label="N pallets" value={String(dockToStock.data.n)} />
+              </div>
             </div>
-          </div>
+          )}
         </FCard>
       </div>
 
-      {/* ─── Top stock + Ledger ─────────────────────────────────── */}
+      {/* Top stock + Ledger */}
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}>
         <FCard t={t} padding={0}>
           <div
@@ -377,49 +364,56 @@ export default function FloorOperationsPreview() {
             <div>Pallets</div>
             <div style={{ textAlign: "right" }}>On hand</div>
           </div>
-          {TOP_STOCK.map((s) => (
-            <div
-              key={s.sku}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "110px 1fr 80px 120px",
-                gap: 14,
-                padding: "12px 20px",
-                alignItems: "center",
-                borderTop: `1px dashed ${t.border}`,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: FONTS.mono,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: t.ink,
-                  letterSpacing: 0.2,
-                }}
-              >
-                {s.sku}
-              </span>
-              <span style={{ fontSize: 13, color: t.body }}>{s.name}</span>
-              <span>
-                <FPill t={t} tone="neutral" size="sm">
-                  {s.pallets}
-                </FPill>
-              </span>
-              <span
-                style={{
-                  fontFamily: FONTS.mono,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  color: t.ink,
-                  letterSpacing: -0.4,
-                  textAlign: "right",
-                }}
-              >
-                {s.onHand}
-              </span>
+          {topStock.isLoading ? (
+            <div style={{ padding: 20 }}>
+              <Skeleton t={t} lines={4} rowHeight={36} />
             </div>
-          ))}
+          ) : (topStock.data ?? []).length === 0 ? (
+            <EmptyState t={t} title="No stored stock" />
+          ) : (
+            (topStock.data ?? []).map((s) => (
+              <div
+                key={s.productId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "110px 1fr 80px 120px",
+                  gap: 14,
+                  padding: "12px 20px",
+                  alignItems: "center",
+                  borderTop: `1px dashed ${t.border}`,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: t.ink,
+                  }}
+                >
+                  {s.sku ?? "—"}
+                </span>
+                <span style={{ fontSize: 13, color: t.body }}>{s.name}</span>
+                <span>
+                  <FPill t={t} tone="neutral" size="sm">
+                    {String(s.palletCount)}
+                  </FPill>
+                </span>
+                <span
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: t.ink,
+                    letterSpacing: -0.4,
+                    textAlign: "right",
+                  }}
+                >
+                  {s.qty.toLocaleString()}
+                </span>
+              </div>
+            ))
+          )}
         </FCard>
 
         {/* Movement ledger */}
@@ -447,21 +441,21 @@ export default function FloorOperationsPreview() {
               ● LIVE
             </FPill>
           </div>
-          <div>
-            {LEDGER.map((row, i) => {
-              const dot =
-                row.color === "primary" ? t.primary :
-                row.color === "sky" ? t.sky :
-                row.color === "mint" ? t.mint :
-                row.color === "coral" ? t.coral :
-                row.color === "lilac" ? t.lilac :
-                t.muted;
+          {ledger.isLoading ? (
+            <div style={{ padding: 20 }}>
+              <Skeleton t={t} lines={5} rowHeight={36} />
+            </div>
+          ) : (ledger.data ?? []).length === 0 ? (
+            <EmptyState t={t} title="No recent movements" />
+          ) : (
+            (ledger.data ?? []).map((row) => {
+              const dot = ledgerColor(row.reason);
               return (
                 <div
-                  key={i}
+                  key={row.id}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "16px 70px 1fr 60px",
+                    gridTemplateColumns: "16px 80px 1fr 70px",
                     gap: 10,
                     padding: "10px 20px",
                     alignItems: "center",
@@ -489,8 +483,18 @@ export default function FloorOperationsPreview() {
                   >
                     {row.reason}
                   </span>
-                  <span style={{ fontSize: 12.5, color: t.body, lineHeight: 1.4 }}>
-                    {row.text}
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      color: t.body,
+                      lineHeight: 1.4,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {row.notes ??
+                      `Pallet ${row.palletId?.slice(0, 8) ?? "—"}`}
                   </span>
                   <span
                     style={{
@@ -501,28 +505,54 @@ export default function FloorOperationsPreview() {
                       textAlign: "right",
                     }}
                   >
-                    {row.ago}
+                    {formatAgo(new Date(row.createdAt))}
                   </span>
                 </div>
               );
-            })}
-          </div>
+            })
+          )}
         </FCard>
       </div>
-
-      <PreviewBanner />
     </FShell>
   );
 }
 
-// ─── Bits ──────────────────────────────────────────────────
+function fmtSeconds(s: number): string {
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.round(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function formatAgo(date: Date): string {
+  const diff = Date.now() - date.getTime();
+  const m = Math.round(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function ledgerColor(reason: string): string {
+  if (reason === "pick") return t.primary;
+  if (reason === "receive") return t.sky;
+  if (reason === "putaway") return t.lilac;
+  if (reason === "adjust") return t.coral;
+  if (reason === "ship") return t.mint;
+  return t.muted;
+}
 
 function DockToStockRing({ value }: { value: number }) {
   const size = 140;
   const stroke = 12;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const dash = c * value;
+  // Cap at 8h for the ring (most warehouses target ≤ 60min)
+  const TARGET_HOURS = 8;
+  const frac = Math.min(1, value / (TARGET_HOURS * 3600));
+  const dash = c * (1 - frac); // shorter dash = faster (better)
   return (
     <div style={{ width: size, height: size, position: "relative" }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
@@ -547,41 +577,28 @@ function DockToStockRing({ value }: { value: number }) {
         />
       </svg>
       <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "grid",
-          placeItems: "center",
-          flexDirection: "column",
-        }}
+        style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}
       >
         <div
           style={{
             fontFamily: FONTS.mono,
-            fontSize: 32,
+            fontSize: 22,
             fontWeight: 800,
             color: t.ink,
-            letterSpacing: -1,
+            letterSpacing: -0.5,
             lineHeight: 1,
+            textAlign: "center",
           }}
         >
-          {Math.round(value * 100)}
-          <span style={{ fontSize: 16, color: t.muted, marginLeft: 2 }}>%</span>
+          {fmtSeconds(value)}
+          <div style={{ fontSize: 9, color: t.muted, marginTop: 4 }}>AVG</div>
         </div>
       </div>
     </div>
   );
 }
 
-function RingStat({
-  label,
-  value,
-  delta,
-}: {
-  label: string;
-  value: string;
-  delta?: "mint" | "coral";
-}) {
+function RingStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div
@@ -601,33 +618,13 @@ function RingStat({
           fontFamily: FONTS.mono,
           fontSize: 18,
           fontWeight: 800,
-          color: delta ? (delta === "mint" ? t.mint : t.coral) : t.ink,
+          color: t.ink,
           letterSpacing: -0.4,
           marginTop: 2,
         }}
       >
         {value}
       </div>
-    </div>
-  );
-}
-
-function PreviewBanner() {
-  return (
-    <div
-      style={{
-        marginTop: 24,
-        padding: "14px 18px",
-        background: t.surface,
-        border: `1px dashed ${t.border}`,
-        borderRadius: 12,
-        fontFamily: FONTS.mono,
-        fontSize: 11,
-        color: t.mutedSoft,
-        letterSpacing: 0.4,
-      }}
-    >
-      FLOOR MODE PREVIEW · mock data · later phase wires ops.* tRPC queries
     </div>
   );
 }

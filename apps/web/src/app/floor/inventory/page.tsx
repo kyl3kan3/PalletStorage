@@ -1,268 +1,141 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill } from "~/components/kit";
+import { FCard, FBtn, FPill, Skeleton, EmptyState } from "~/components/kit";
 import { floorTheme as t, FONTS } from "~/lib/theme";
 import { Ic } from "~/components/icons";
+import { trpc } from "~/lib/trpc";
 
 /**
- * Floor-mode Inventory / Scan preview at /floor/inventory.
+ * Floor-mode Inventory / Scan at /floor/inventory. Wired to
+ * pallet.byLpn for direct LPN lookups + product.search for the
+ * contents table's product names.
  *
- * Paste an LPN, SKU, location, or PO and see everything. Layout from
- * the handoff:
- *   - Hero scan field (45%): marigold-bordered input with mono LPN,
- *     valid-prefix hint, recent scans list (5 items).
- *   - Result card (55%): 60-px squircle pallet icon, big LPN, location
- *     pill, 6-cell metadata grid, contents table, action row.
- *
- * Mock data only; later phase prefix-routes the input (P- → pallet,
- * SO- → outbound, PO- → inbound, SKU- → product, location regex →
- * location detail) and pulls pallet.byLpn / location.byCode.
+ * Typing in the hero input fires pallet.byLpn when the input looks
+ * like an LPN (starts with P-). Other prefixes (SO- PO- SKU- location)
+ * route via the Cmd+K palette already, so this page focuses on the
+ * pallet detail card.
  */
-
-interface ScanResult {
-  lpn: string;
-  status: "stored" | "received" | "in_transit" | "picked" | "shipped" | "damaged";
-  location: string;
-  receivedAt: string;
-  lot: string;
-  weight: string;
-  fromPo: string;
-  ageDays: number;
-  contents: Array<{ sku: string; name: string; qty: string }>;
-}
-
-const SAMPLE: ScanResult = {
-  lpn: "P-9QK4X72L",
-  status: "stored",
-  location: "A2-02-B",
-  receivedAt: "Mar 12 · 09:14",
-  lot: "LOT-2026-Q1",
-  weight: "312 kg",
-  fromPo: "PO-58812",
-  ageDays: 4,
-  contents: [
-    { sku: "SKU-00041", name: "Vanilla Extract 8oz", qty: "120 ea" },
-    { sku: "SKU-00102", name: "Cane Sugar 50lb", qty: "8 cs" },
-    { sku: "SKU-00211", name: "Whole Tomatoes #10", qty: "12 cs" },
-  ],
-};
-
-const RECENT_SCANS: Array<{
-  code: string;
-  type: "pallet" | "location" | "sku" | "po" | "so";
-  desc: string;
-  ago: string;
-}> = [
-  { code: "P-9QK4X72L", type: "pallet", desc: "Vanilla Extract · A2-02-B", ago: "just now" },
-  { code: "A2-04-B", type: "location", desc: "3 pallets stored · 78% full", ago: "2m" },
-  { code: "PO-58812", type: "po", desc: "ACME Corp · receiving", ago: "4m" },
-  { code: "SKU-00041", type: "sku", desc: "Vanilla Extract 8oz · 2,880 ea on hand", ago: "12m" },
-  { code: "SO-24881", type: "so", desc: "Northgate Foods · picking 13/22", ago: "18m" },
-];
 
 export default function FloorInventoryPreview() {
   const [input, setInput] = useState("");
-  const [result, setResult] = useState<ScanResult | null>(SAMPLE);
+  const lpn = input.trim().toUpperCase();
+  const isLpn = lpn.startsWith("P-") && lpn.length >= 4;
 
-  function handleScan(code: string) {
-    setInput(code);
-    // In a later phase: prefix-route to /inventory?lpn=... or call
-    // pallet.byLpn / location.byCode. For preview, just show the
-    // sample card whenever input is non-empty.
-    setResult(code.trim() ? SAMPLE : null);
-  }
+  const pallet = trpc.pallet.byLpn.useQuery(
+    { lpn },
+    { enabled: isLpn },
+  );
+
+  const products = trpc.product.search.useQuery({ q: "", limit: 500 });
+  const productMap = useMemo(() => {
+    const m = new Map<string, { sku: string | null; name: string }>();
+    for (const p of products.data ?? []) m.set(p.id, { sku: p.sku, name: p.name });
+    return m;
+  }, [products.data]);
 
   return (
     <FShell
-      active="inventory"
       eyebrow="Scan · paste · type"
       title="What are we looking at?"
       subtitle="LPN · SKU · location · order"
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.2fr",
-          gap: 16,
-        }}
-      >
-        {/* ─── Hero scan field + recent scans ───────────────────── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <FCard t={t} padding={22}>
-            <div
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 16 }}>
+        {/* Hero scan field */}
+        <FCard t={t} padding={22}>
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: t.muted,
+              letterSpacing: 0.8,
+              textTransform: "uppercase",
+              marginBottom: 12,
+            }}
+          >
+            Scan or paste a pallet LPN
+          </div>
+          <div
+            style={{
+              position: "relative",
+              border: `2px solid ${input ? t.primary : "rgba(255,178,62,.4)"}`,
+              background: t.surfaceAlt,
+              borderRadius: 16,
+              padding: "18px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              boxShadow: input ? `0 0 24px ${t.primaryGlow}` : undefined,
+              transition: "box-shadow .15s, border-color .15s",
+            }}
+          >
+            <Ic.Scan size={28} color={t.primary} />
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="P-9QK4X72L"
               style={{
+                flex: 1,
+                minWidth: 0,
                 fontFamily: FONTS.mono,
-                fontSize: 10.5,
+                fontSize: 24,
                 fontWeight: 800,
-                color: t.muted,
-                letterSpacing: 0.8,
-                textTransform: "uppercase",
-                marginBottom: 12,
+                letterSpacing: 1.5,
+                color: t.ink,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                padding: 0,
               }}
-            >
-              Scan or paste
-            </div>
-            <div
-              style={{
-                position: "relative",
-                border: `2px solid ${input ? t.primary : "rgba(255,178,62,.4)"}`,
-                background: t.surfaceAlt,
-                borderRadius: 16,
-                padding: "18px 20px",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                boxShadow: input ? `0 0 24px ${t.primaryGlow}` : undefined,
-                transition: "box-shadow .15s, border-color .15s",
-              }}
-            >
-              <Ic.Scan size={28} color={t.primary} />
-              <input
-                value={input}
-                onChange={(e) => handleScan(e.target.value)}
-                placeholder="P-… · SO-… · SKU-… · A2-02-B"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  fontFamily: FONTS.mono,
-                  fontSize: 24,
-                  fontWeight: 800,
-                  letterSpacing: 1.5,
-                  color: t.ink,
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  padding: 0,
-                }}
-              />
-              {result && (
-                <FPill t={t} tone="mint">
-                  {result.status}
-                </FPill>
-              )}
-            </div>
-            <div
-              style={{
-                marginTop: 12,
-                fontFamily: FONTS.mono,
-                fontSize: 11,
-                color: t.mutedSoft,
-                letterSpacing: 0.4,
-                lineHeight: 1.6,
-              }}
-            >
-              <strong style={{ color: t.muted }}>P-</strong> pallet ·{" "}
-              <strong style={{ color: t.muted }}>SO-</strong> outbound ·{" "}
-              <strong style={{ color: t.muted }}>PO-</strong> inbound ·{" "}
-              <strong style={{ color: t.muted }}>SKU-</strong> product ·{" "}
-              <strong style={{ color: t.muted }}>A2-02-B</strong> location
-            </div>
-          </FCard>
+            />
+            {pallet.data && (
+              <FPill t={t} tone="mint">
+                {pallet.data.pallet.status}
+              </FPill>
+            )}
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              color: t.mutedSoft,
+              letterSpacing: 0.4,
+              lineHeight: 1.6,
+            }}
+          >
+            <strong style={{ color: t.muted }}>P-…</strong> pallet lookup. For{" "}
+            <strong style={{ color: t.muted }}>SO-</strong> /{" "}
+            <strong style={{ color: t.muted }}>PO-</strong> /{" "}
+            <strong style={{ color: t.muted }}>SKU-</strong> /{" "}
+            <strong style={{ color: t.muted }}>location</strong>, hit ⌘K.
+          </div>
+        </FCard>
 
-          {/* Recent scans */}
-          <FCard t={t} padding={0}>
-            <div
-              style={{
-                padding: "16px 20px 10px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: FONTS.sans,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  color: t.ink,
-                  letterSpacing: -0.2,
-                }}
-              >
-                Recent scans
-              </div>
-              <span
-                style={{
-                  fontFamily: FONTS.mono,
-                  fontSize: 10,
-                  color: t.mutedSoft,
-                  letterSpacing: 0.6,
-                  textTransform: "uppercase",
-                }}
-              >
-                {RECENT_SCANS.length} in last hour
-              </span>
-            </div>
-            {RECENT_SCANS.map((s, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => handleScan(s.code)}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "16px 130px 1fr 50px",
-                  gap: 10,
-                  padding: "10px 20px",
-                  width: "100%",
-                  alignItems: "center",
-                  borderTop: `1px dashed ${t.border}`,
-                  background: "transparent",
-                  border: "none",
-                  borderBottom: "none",
-                  borderLeft: "none",
-                  borderRight: "none",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  color: t.body,
-                }}
-              >
-                <Ic.Clipboard size={12} color={t.mutedSoft} />
-                <span
-                  style={{
-                    fontFamily: FONTS.mono,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: t.ink,
-                    letterSpacing: 0.2,
-                  }}
-                >
-                  {s.code}
-                </span>
-                <span
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 12.5,
-                    color: t.muted,
-                    minWidth: 0,
-                  }}
-                >
-                  <FPill t={t} tone="neutral" size="sm">
-                    {s.type}
-                  </FPill>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.desc}
-                  </span>
-                </span>
-                <span
-                  style={{
-                    fontFamily: FONTS.mono,
-                    fontSize: 10.5,
-                    color: t.mutedSoft,
-                    textAlign: "right",
-                  }}
-                >
-                  {s.ago}
-                </span>
-              </button>
-            ))}
+        {/* Result column */}
+        {!isLpn ? (
+          <FCard t={t} padding={36}>
+            <EmptyState
+              t={t}
+              title="Start typing"
+              hint="Paste a pallet LPN (e.g. P-9QK4X72L) into the box on the left, or hit ⌘K for the full prefix router."
+            />
           </FCard>
-        </div>
-
-        {/* ─── Result card ─────────────────────────────────────── */}
-        {result ? (
+        ) : pallet.isLoading ? (
+          <FCard t={t} padding={24}>
+            <Skeleton t={t} lines={4} rowHeight={56} />
+          </FCard>
+        ) : !pallet.data ? (
+          <FCard t={t} padding={36}>
+            <EmptyState
+              t={t}
+              title="LPN not found"
+              hint={`No pallet matched "${lpn}" in this organization. Check the prefix and try again.`}
+            />
+          </FCard>
+        ) : (
           <FCard t={t} padding={24}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 18, marginBottom: 24 }}>
               <PalletSquircle />
@@ -290,20 +163,17 @@ export default function FloorInventoryPreview() {
                     lineHeight: 1,
                   }}
                 >
-                  {result.lpn}
+                  {pallet.data.pallet.lpn}
                 </div>
                 <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-                  <FPill t={t} tone="primary">
-                    {result.location}
-                  </FPill>
-                  <FPill t={t} tone="mint">
-                    {result.status}
+                  <FPill t={t} tone={statusTone(pallet.data.pallet.status)}>
+                    {pallet.data.pallet.status}
                   </FPill>
                 </div>
               </div>
             </div>
 
-            {/* 3×2 metadata grid */}
+            {/* Metadata */}
             <div
               style={{
                 display: "grid",
@@ -314,12 +184,20 @@ export default function FloorInventoryPreview() {
                 borderBottom: `1px solid ${t.border}`,
               }}
             >
-              <Meta label="Location" value={result.location} mono />
-              <Meta label="Received" value={result.receivedAt} />
-              <Meta label="Lot" value={result.lot} mono />
-              <Meta label="Weight" value={result.weight} mono />
-              <Meta label="From PO" value={result.fromPo} mono />
-              <Meta label="Age" value={`${result.ageDays} days`} />
+              <Meta
+                label="Weight"
+                value={pallet.data.pallet.weightKg ? `${pallet.data.pallet.weightKg} kg` : "—"}
+                mono
+              />
+              <Meta
+                label="Created"
+                value={new Date(pallet.data.pallet.createdAt).toLocaleDateString()}
+              />
+              <Meta
+                label="Pallet ID"
+                value={pallet.data.pallet.id.slice(0, 8)}
+                mono
+              />
             </div>
 
             {/* Contents */}
@@ -335,49 +213,69 @@ export default function FloorInventoryPreview() {
                   marginBottom: 10,
                 }}
               >
-                Contents · {result.contents.length} SKUs
+                Contents · {pallet.data.items.length} line
+                {pallet.data.items.length === 1 ? "" : "s"}
               </div>
-              {result.contents.map((c) => (
-                <div
-                  key={c.sku}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "110px 1fr 90px",
-                    gap: 12,
-                    padding: "10px 0",
-                    alignItems: "center",
-                    borderTop: `1px dashed ${t.border}`,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: FONTS.mono,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: t.ink,
-                    }}
-                  >
-                    {c.sku}
-                  </span>
-                  <span style={{ fontSize: 13, color: t.body }}>{c.name}</span>
-                  <span
-                    style={{
-                      fontFamily: FONTS.mono,
-                      fontSize: 14,
-                      fontWeight: 800,
-                      color: t.ink,
-                      textAlign: "right",
-                      letterSpacing: -0.3,
-                    }}
-                  >
-                    {c.qty}
-                  </span>
+              {pallet.data.items.length === 0 ? (
+                <div style={{ fontSize: 13, color: t.mutedSoft }}>
+                  Empty pallet — no items recorded.
                 </div>
-              ))}
+              ) : (
+                pallet.data.items.map((it) => {
+                  const product = productMap.get(it.productId);
+                  return (
+                    <div
+                      key={it.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "110px 1fr 90px",
+                        gap: 12,
+                        padding: "10px 0",
+                        alignItems: "center",
+                        borderTop: `1px dashed ${t.border}`,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: FONTS.mono,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: t.ink,
+                        }}
+                      >
+                        {product?.sku ?? "—"}
+                      </span>
+                      <span style={{ fontSize: 13, color: t.body }}>
+                        {product?.name ?? `Product ${it.productId.slice(0, 8)}`}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: FONTS.mono,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          color: t.ink,
+                          textAlign: "right",
+                          letterSpacing: -0.3,
+                        }}
+                      >
+                        {it.qty} {it.qtyUnit}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* Action row */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 14, borderTop: `1px solid ${t.border}` }}>
+            {/* Actions */}
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                paddingTop: 14,
+                borderTop: `1px solid ${t.border}`,
+              }}
+            >
               <FBtn t={t} variant="primary" size="md" icon={Ic.Plus}>
                 Move
               </FBtn>
@@ -392,64 +290,21 @@ export default function FloorInventoryPreview() {
               </FBtn>
             </div>
           </FCard>
-        ) : (
-          <FCard t={t} padding={36}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 14,
-                textAlign: "center",
-                color: t.muted,
-              }}
-            >
-              <Ic.Search size={32} color={t.mutedSoft} />
-              <div
-                style={{
-                  fontFamily: FONTS.mono,
-                  fontSize: 11,
-                  letterSpacing: 0.6,
-                  textTransform: "uppercase",
-                  color: t.mutedSoft,
-                }}
-              >
-                Scan or paste a code
-              </div>
-              <div style={{ fontSize: 13, lineHeight: 1.5, maxWidth: 320 }}>
-                Drop a pallet LPN, location code, SKU, or order ref in the box
-                on the left. Recent scans replay with one tap.
-              </div>
-            </div>
-          </FCard>
         )}
-      </div>
-
-      <div
-        style={{
-          marginTop: 24,
-          padding: "14px 18px",
-          background: t.surface,
-          border: `1px dashed ${t.border}`,
-          borderRadius: 12,
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          color: t.mutedSoft,
-          letterSpacing: 0.4,
-        }}
-      >
-        FLOOR MODE PREVIEW · mock data · later phase wires pallet.byLpn /
-        location.byCode + prefix routing
       </div>
     </FShell>
   );
 }
 
-// ─── Bits ──────────────────────────────────────────────────
+function statusTone(s: string): "primary" | "mint" | "sky" | "coral" | "neutral" {
+  if (s === "stored") return "mint";
+  if (s === "received") return "primary";
+  if (s === "in_transit") return "sky";
+  if (s === "damaged") return "coral";
+  return "neutral";
+}
 
 function PalletSquircle() {
-  // 60×60 stylized stacked-pallet icon, marigold tint. Matches the
-  // squircle motif from the design handoff.
   return (
     <div
       style={{

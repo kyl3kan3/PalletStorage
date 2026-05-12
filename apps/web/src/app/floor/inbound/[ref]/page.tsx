@@ -1,76 +1,83 @@
 "use client";
 
-import { use } from "react";
+import { use, useMemo } from "react";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill } from "~/components/kit";
+import { FCard, FBtn, FPill, Skeleton, EmptyState } from "~/components/kit";
 import { floorTheme as t, FONTS, Cubby } from "~/lib/theme";
 import { Ic } from "~/components/icons";
+import { trpc } from "~/lib/trpc";
 
 /**
- * Floor-mode Inbound detail preview at /floor/inbound/[ref].
+ * Floor-mode Inbound detail at /floor/inbound/[ref]. Route param is
+ * the order UUID; filename keeps [ref] for handoff parity.
  *
- * Layout per the handoff:
- *   - Lines table (60%): 6-col grid with variance pill per row.
- *     Short lines tinted coral-soft; matched lines show mint.
- *   - Right column (40%):
- *     - Variance Cubby (coral-pinned, mood=wow, "Log reason" CTA)
- *     - Putaway plan (3 zones with mini progress bars)
- *     - Truck card (2×2 grid: carrier / trailer / driver / ETA-out)
- *
- * Mock data; later phase wires order.inbound + order.inboundLines.
+ * inbound.byId returns { order, lines }. Lines are raw with only
+ * productId; product.search gives us the bulk product map. Variance
+ * pills are computed from (qtyReceived - qtyExpected) per line.
  */
-
-interface Line {
-  line: number;
-  sku: string;
-  name: string;
-  expected: number;
-  received: number;
-}
-
-const LINES: Line[] = [
-  { line: 1, sku: "SKU-00041", name: "Vanilla Extract 8oz", expected: 120, received: 120 },
-  { line: 2, sku: "SKU-00102", name: "Cane Sugar 50lb", expected: 40, received: 36 },
-  { line: 3, sku: "SKU-00038", name: "Coffee Beans 5lb", expected: 30, received: 30 },
-  { line: 4, sku: "SKU-00211", name: "Whole Tomatoes #10", expected: 24, received: 10 },
-  { line: 5, sku: "SKU-00150", name: "Olive Oil 1L", expected: 18, received: 18 },
-  { line: 6, sku: "SKU-00078", name: "Sea Salt 16oz", expected: 48, received: 0 },
-];
-
-const PUTAWAY = [
-  { zone: "A2 · dry", suggested: 6, planned: 4 },
-  { zone: "A3 · dry", suggested: 3, planned: 2 },
-  { zone: "C1 · bulk", suggested: 2, planned: 1 },
-];
 
 export default function FloorInboundDetail({
   params,
 }: {
   params: Promise<{ ref: string }>;
 }) {
-  const { ref } = use(params);
-  const totalExp = LINES.reduce((n, l) => n + l.expected, 0);
-  const totalRecv = LINES.reduce((n, l) => n + l.received, 0);
-  const varianceTotal = totalRecv - totalExp;
+  const { ref: id } = use(params);
+  const detail = trpc.inbound.byId.useQuery(
+    { id },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+  const products = trpc.product.search.useQuery({ q: "", limit: 500 });
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, { sku: string | null; name: string }>();
+    for (const p of products.data ?? []) m.set(p.id, { sku: p.sku, name: p.name });
+    return m;
+  }, [products.data]);
+
+  if (detail.isLoading || products.isLoading) {
+    return (
+      <FShell eyebrow="Receiving" title="Loading…">
+        <Skeleton t={t} lines={6} rowHeight={64} />
+      </FShell>
+    );
+  }
+  if (!detail.data) {
+    return (
+      <FShell eyebrow="Receiving" title="Not found">
+        <FCard t={t}>
+          <EmptyState t={t} title="Order not found" />
+        </FCard>
+      </FShell>
+    );
+  }
+
+  const { order, lines } = detail.data;
+  const totalExp = lines.reduce((n, l) => n + l.qtyExpected, 0);
+  const totalRecv = lines.reduce((n, l) => n + l.qtyReceived, 0);
+  const variance = totalRecv - totalExp;
+  const shortLines = lines.filter((l) => l.qtyReceived < l.qtyExpected).length;
 
   return (
     <FShell
-      eyebrow={`Receiving · ${ref}`}
-      title={ref}
-      subtitle={`ACME Corp · D-01 · ${varianceTotal} variance`}
+      eyebrow={`Receiving · ${order.reference}`}
+      title={order.reference}
+      subtitle={
+        order.supplier
+          ? `${order.supplier}${variance !== 0 ? ` · ${variance > 0 ? "+" : ""}${variance} variance` : ""}`
+          : undefined
+      }
       actions={
         <>
-          <FBtn t={t} variant="ghost" size="md">
-            Cancel
-          </FBtn>
-          <FBtn t={t} variant="primary" size="md" icon={Ic.Check}>
-            Close order
-          </FBtn>
+          {order.status === "receiving" && (
+            <FBtn t={t} variant="primary" size="md" icon={Ic.Check}>
+              Close order
+            </FBtn>
+          )}
         </>
       }
     >
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
-        {/* Lines table */}
+        {/* Lines */}
         <FCard t={t} padding={0}>
           <div
             style={{
@@ -93,13 +100,15 @@ export default function FloorInboundDetail({
             <div>Recv.</div>
             <div style={{ textAlign: "right" }}>Variance</div>
           </div>
-          {LINES.map((l) => {
-            const v = l.received - l.expected;
-            const matched = v === 0;
+          {lines.length === 0 && <EmptyState t={t} title="No lines on this order" />}
+          {lines.map((l, i) => {
+            const v = l.qtyReceived - l.qtyExpected;
+            const matched = v === 0 && l.qtyReceived > 0;
             const short = v < 0;
+            const product = productMap.get(l.productId);
             return (
               <div
-                key={l.line}
+                key={l.id}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "32px 110px 1fr 80px 80px 110px",
@@ -107,11 +116,15 @@ export default function FloorInboundDetail({
                   padding: "12px 20px",
                   alignItems: "center",
                   borderTop: `1px dashed ${t.border}`,
-                  background: short ? t.coralSoft : matched ? t.mintSoft : undefined,
+                  background: short
+                    ? t.coralSoft
+                    : matched
+                      ? t.mintSoft
+                      : undefined,
                 }}
               >
                 <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: t.muted }}>
-                  {l.line}
+                  {i + 1}
                 </span>
                 <span
                   style={{
@@ -121,9 +134,11 @@ export default function FloorInboundDetail({
                     color: t.ink,
                   }}
                 >
-                  {l.sku}
+                  {product?.sku ?? "—"}
                 </span>
-                <span style={{ fontSize: 13, color: t.body }}>{l.name}</span>
+                <span style={{ fontSize: 13, color: t.body }}>
+                  {product?.name ?? `Product ${l.productId.slice(0, 8)}`}
+                </span>
                 <span
                   style={{
                     fontFamily: FONTS.mono,
@@ -132,7 +147,7 @@ export default function FloorInboundDetail({
                     color: t.body,
                   }}
                 >
-                  {l.expected}
+                  {l.qtyExpected}
                 </span>
                 <span
                   style={{
@@ -142,10 +157,14 @@ export default function FloorInboundDetail({
                     color: t.ink,
                   }}
                 >
-                  {l.received}
+                  {l.qtyReceived}
                 </span>
                 <span style={{ textAlign: "right" }}>
-                  {matched ? (
+                  {l.qtyReceived === 0 ? (
+                    <FPill t={t} tone="neutral" size="sm">
+                      pending
+                    </FPill>
+                  ) : matched ? (
                     <FPill t={t} tone="mint" size="sm">
                       MATCHED
                     </FPill>
@@ -166,109 +185,52 @@ export default function FloorInboundDetail({
 
         {/* Right column */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Variance Cubby */}
-          <FCard
-            t={t}
-            padding={20}
-            style={{
-              borderTop: `2px solid ${t.coral}`,
-              boxShadow: `0 8px 24px rgba(255,107,91,.15), 0 1px 0 rgba(255,255,255,.03)`,
-            }}
-          >
-            <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-              <Cubby size={48} t={t} mood="wow" />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <FPill t={t} tone="coral" size="sm">
-                  HEADS UP · VARIANCE
-                </FPill>
-                <div
-                  style={{
-                    marginTop: 10,
-                    fontFamily: FONTS.sans,
-                    fontSize: 14,
-                    color: t.body,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Heads up — <strong style={{ color: t.ink }}>52 units short</strong>{" "}
-                  across 2 lines. Log a reason before closing.
-                </div>
-                <div style={{ marginTop: 14 }}>
-                  <FBtn t={t} variant="danger" size="md" full>
-                    Log reason
-                  </FBtn>
-                </div>
-              </div>
-            </div>
-          </FCard>
-
-          {/* Putaway plan */}
-          <FCard t={t} padding={20}>
-            <div
+          {/* Variance Cubby — shown when there's a short */}
+          {shortLines > 0 && (
+            <FCard
+              t={t}
+              padding={20}
               style={{
-                fontFamily: FONTS.mono,
-                fontSize: 10.5,
-                fontWeight: 800,
-                color: t.muted,
-                letterSpacing: 0.8,
-                textTransform: "uppercase",
-                marginBottom: 12,
+                borderTop: `2px solid ${t.coral}`,
+                boxShadow: `0 8px 24px rgba(255,107,91,.15), 0 1px 0 rgba(255,255,255,.03)`,
               }}
             >
-              Putaway plan
-            </div>
-            {PUTAWAY.map((z) => {
-              const pct = z.planned / z.suggested;
-              return (
-                <div
-                  key={z.zone}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 50px",
-                    gap: 10,
-                    padding: "10px 0",
-                    alignItems: "center",
-                    borderTop: `1px dashed ${t.border}`,
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 12.5, color: t.ink, fontWeight: 600, marginBottom: 4 }}>
-                      {z.zone}
-                    </div>
-                    <div
-                      style={{
-                        height: 4,
-                        borderRadius: 2,
-                        background: t.surfaceAlt,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct * 100}%`,
-                          height: "100%",
-                          background: t.primary,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <span
+              <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                <Cubby size={48} t={t} mood="wow" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <FPill t={t} tone="coral" size="sm">
+                    HEADS UP · VARIANCE
+                  </FPill>
+                  <div
                     style={{
-                      fontFamily: FONTS.mono,
-                      fontSize: 11.5,
-                      fontWeight: 700,
+                      marginTop: 10,
+                      fontFamily: FONTS.sans,
+                      fontSize: 14,
                       color: t.body,
-                      textAlign: "right",
+                      lineHeight: 1.5,
                     }}
                   >
-                    {z.planned} / {z.suggested}
-                  </span>
+                    Heads up —{" "}
+                    <strong style={{ color: t.ink }}>
+                      {Math.abs(variance)} units short
+                    </strong>{" "}
+                    across {shortLines} line{shortLines > 1 ? "s" : ""}.
+                    {order.status === "receiving" &&
+                      " Log a reason before closing."}
+                  </div>
+                  {order.status === "receiving" && (
+                    <div style={{ marginTop: 14 }}>
+                      <FBtn t={t} variant="danger" size="md" full>
+                        Log reason
+                      </FBtn>
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </FCard>
+              </div>
+            </FCard>
+          )}
 
-          {/* Truck */}
+          {/* Status meta */}
           <FCard t={t} padding={20}>
             <div
               style={{
@@ -281,7 +243,7 @@ export default function FloorInboundDetail({
                 marginBottom: 12,
               }}
             >
-              Truck · D-01
+              Order info
             </div>
             <div
               style={{
@@ -290,35 +252,69 @@ export default function FloorInboundDetail({
                 gap: 14,
               }}
             >
-              <TruckStat label="Carrier" value="ODFL" />
-              <TruckStat label="Trailer" value="ODFL-47291" mono />
-              <TruckStat label="Driver" value="J. Holm" />
-              <TruckStat label="ETA out" value="16:30" mono />
+              <Stat
+                label="Status"
+                value={order.status}
+                mono
+              />
+              <Stat label="Lines" value={String(lines.length)} mono />
+              <Stat
+                label="Expected"
+                value={
+                  order.expectedAt
+                    ? new Date(order.expectedAt).toLocaleString([], {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })
+                    : "—"
+                }
+                mono
+              />
+              <Stat
+                label="Received"
+                value={
+                  order.receivedAt
+                    ? new Date(order.receivedAt).toLocaleDateString()
+                    : "—"
+                }
+                mono
+              />
+              <Stat label="Supplier" value={order.supplier ?? "—"} />
+              <Stat
+                label="Total qty"
+                value={`${totalRecv} / ${totalExp}`}
+                mono
+              />
             </div>
           </FCard>
-        </div>
-      </div>
 
-      <div
-        style={{
-          marginTop: 24,
-          padding: "14px 18px",
-          background: t.surface,
-          border: `1px dashed ${t.border}`,
-          borderRadius: 12,
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          color: t.mutedSoft,
-          letterSpacing: 0.4,
-        }}
-      >
-        FLOOR MODE PREVIEW · mock data · later phase wires order.inbound({"{ref}"})
+          {order.closeReason && (
+            <FCard t={t} padding={20}>
+              <div
+                style={{
+                  fontFamily: FONTS.mono,
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  color: t.muted,
+                  letterSpacing: 0.8,
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                Close reason
+              </div>
+              <div style={{ fontSize: 13, color: t.body, lineHeight: 1.5 }}>
+                {order.closeReason}
+              </div>
+            </FCard>
+          )}
+        </div>
       </div>
     </FShell>
   );
 }
 
-function TruckStat({
+function Stat({
   label,
   value,
   mono,

@@ -1,66 +1,102 @@
 "use client";
 
-import { use } from "react";
+import { use, useMemo } from "react";
 import { FShell } from "~/components/floor-shell";
-import { FCard, FBtn, FPill } from "~/components/kit";
+import { FCard, FBtn, FPill, Skeleton, EmptyState } from "~/components/kit";
 import { floorTheme as t, FONTS, Cubby } from "~/lib/theme";
 import { Ic } from "~/components/icons";
+import { trpc } from "~/lib/trpc";
 
 /**
- * Floor-mode Outbound detail preview at /floor/outbound/[ref].
+ * Floor-mode Outbound detail at /floor/outbound/[ref]. The route param
+ * is the order UUID (from the list page link); we keep the file
+ * pathname [ref] for back-compat with handoff naming.
  *
- * Layout per the handoff:
- *   - Header: ref title + customer/countdown subtitle + Cancel/Mark-packed
- *   - Stepper (full width): Open ✓ · Picking (active, marigold) · Packed · Shipped
- *   - Lines table (60%): #, SKU, name, ordered, picked, progress bar
- *   - Right column (40%): Cubby ETA, Crew, Ship info
- *
- * Mock data; later phase wires order.outbound({ ref }) +
- * order.outboundLines({ ref }).
+ * outbound.byId returns { order, lines }; lines carry productId only
+ * (no joined name/SKU). We bulk-fetch products via product.search and
+ * build a client-side map for the lines table. Picks / crew aren't in
+ * the byId payload, so the stepper status reflects only the order's
+ * raw status field.
  */
-
-const LINES = [
-  { line: 1, sku: "SKU-00041", name: "Vanilla Extract 8oz", ordered: 24, picked: 24 },
-  { line: 2, sku: "SKU-00102", name: "Cane Sugar 50lb", ordered: 12, picked: 12 },
-  { line: 3, sku: "SKU-00038", name: "Coffee Beans 5lb", ordered: 18, picked: 18 },
-  { line: 4, sku: "SKU-00211", name: "Whole Tomatoes #10", ordered: 14, picked: 8, active: true },
-  { line: 5, sku: "SKU-00150", name: "Olive Oil 1L", ordered: 20, picked: 0 },
-  { line: 6, sku: "SKU-00078", name: "Sea Salt 16oz", ordered: 36, picked: 0 },
-];
-
-const STEPS = ["Open", "Picking", "Packed", "Shipped"] as const;
-const ACTIVE_STEP = 1; // "Picking"
 
 export default function FloorOutboundDetail({
   params,
 }: {
   params: Promise<{ ref: string }>;
 }) {
-  const { ref } = use(params);
+  const { ref: id } = use(params);
+  const detail = trpc.outbound.byId.useQuery(
+    { id },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+  // Bulk product lookup; capped at 500 SKUs per org (procedure limit)
+  const products = trpc.product.search.useQuery({ q: "", limit: 500 });
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, { sku: string | null; name: string }>();
+    for (const p of products.data ?? []) m.set(p.id, { sku: p.sku, name: p.name });
+    return m;
+  }, [products.data]);
+
+  if (detail.isLoading || products.isLoading) {
+    return (
+      <FShell eyebrow="Order detail" title="Loading…">
+        <Skeleton t={t} lines={6} rowHeight={64} />
+      </FShell>
+    );
+  }
+  if (!detail.data) {
+    return (
+      <FShell eyebrow="Order detail" title="Not found">
+        <FCard t={t}>
+          <EmptyState
+            t={t}
+            title="Order not found"
+            hint="It may have been deleted, cancelled, or belongs to a different organization."
+          />
+        </FCard>
+      </FShell>
+    );
+  }
+
+  const { order, lines } = detail.data;
+  const activeStep = ORDER_STEPS.indexOf(order.status as (typeof ORDER_STEPS)[number]);
+
   return (
     <FShell
-      eyebrow={`Order · ${ref}`}
-      title={ref}
-      subtitle="Northgate Foods · ships in 1h 12m"
+      eyebrow={`Order · ${order.reference}`}
+      title={order.reference}
+      subtitle={
+        order.customer
+          ? `${order.customer}${order.shipBy ? ` · ships ${formatRelative(new Date(order.shipBy))}` : ""}`
+          : undefined
+      }
       actions={
         <>
-          <FBtn t={t} variant="danger" size="md">
-            Cancel order
-          </FBtn>
-          <FBtn t={t} variant="primary" size="md" icon={Ic.Check}>
-            Mark packed
-          </FBtn>
+          {(order.status === "open" || order.status === "picking") && (
+            <FBtn t={t} variant="danger" size="md">
+              Cancel order
+            </FBtn>
+          )}
+          {order.status === "picking" && (
+            <FBtn t={t} variant="primary" size="md" icon={Ic.Check}>
+              Mark packed
+            </FBtn>
+          )}
         </>
       }
     >
       {/* Stepper */}
       <FCard t={t} padding={20} style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {STEPS.map((step, i) => {
-            const done = i < ACTIVE_STEP;
-            const active = i === ACTIVE_STEP;
+          {ORDER_STEPS.map((step, i) => {
+            const done = activeStep >= 0 && i < activeStep;
+            const active = i === activeStep;
             return (
-              <div key={step} style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+              <div
+                key={step}
+                style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}
+              >
                 <div
                   style={{
                     display: "flex",
@@ -102,7 +138,7 @@ export default function FloorOutboundDetail({
                     {step}
                   </span>
                 </div>
-                {i < STEPS.length - 1 && (
+                {i < ORDER_STEPS.length - 1 && (
                   <div
                     style={{
                       flex: 1,
@@ -119,8 +155,8 @@ export default function FloorOutboundDetail({
         </div>
       </FCard>
 
-      {/* Lines + right column */}
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+        {/* Lines */}
         <FCard t={t} padding={0}>
           <div
             style={{
@@ -143,12 +179,17 @@ export default function FloorOutboundDetail({
             <div>Picked</div>
             <div>Progress</div>
           </div>
-          {LINES.map((l) => {
-            const pct = l.ordered ? l.picked / l.ordered : 0;
-            const done = pct === 1;
+          {lines.length === 0 && (
+            <EmptyState t={t} title="No lines on this order" />
+          )}
+          {lines.map((l, i) => {
+            const product = productMap.get(l.productId);
+            const pct = l.qtyOrdered ? l.qtyPicked / l.qtyOrdered : 0;
+            const done = pct >= 1;
+            const active = !done && order.status === "picking" && l.qtyPicked > 0;
             return (
               <div
-                key={l.line}
+                key={l.id}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "32px 110px 1fr 70px 70px 1fr",
@@ -156,17 +197,11 @@ export default function FloorOutboundDetail({
                   padding: "12px 20px",
                   alignItems: "center",
                   borderTop: `1px dashed ${t.border}`,
-                  background: l.active ? t.primarySoft : undefined,
+                  background: active ? t.primarySoft : undefined,
                 }}
               >
-                <span
-                  style={{
-                    fontFamily: FONTS.mono,
-                    fontSize: 11,
-                    color: t.muted,
-                  }}
-                >
-                  {l.line}
+                <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: t.muted }}>
+                  {i + 1}
                 </span>
                 <span
                   style={{
@@ -176,9 +211,11 @@ export default function FloorOutboundDetail({
                     color: t.ink,
                   }}
                 >
-                  {l.sku}
+                  {product?.sku ?? "—"}
                 </span>
-                <span style={{ fontSize: 13, color: t.body }}>{l.name}</span>
+                <span style={{ fontSize: 13, color: t.body }}>
+                  {product?.name ?? `Product ${l.productId.slice(0, 8)}`}
+                </span>
                 <span
                   style={{
                     fontFamily: FONTS.mono,
@@ -187,7 +224,7 @@ export default function FloorOutboundDetail({
                     color: t.ink,
                   }}
                 >
-                  {l.ordered}
+                  {l.qtyOrdered}
                 </span>
                 <span
                   style={{
@@ -197,7 +234,7 @@ export default function FloorOutboundDetail({
                     color: done ? t.mint : t.ink,
                   }}
                 >
-                  {done ? "✓" : ""} {l.picked}
+                  {l.qtyPicked}
                 </span>
                 <div
                   style={{
@@ -209,10 +246,10 @@ export default function FloorOutboundDetail({
                 >
                   <div
                     style={{
-                      width: `${pct * 100}%`,
+                      width: `${Math.min(100, pct * 100)}%`,
                       height: "100%",
                       background: done ? t.mint : t.primary,
-                      boxShadow: l.active ? `0 0 8px ${t.primaryGlow}` : undefined,
+                      boxShadow: active ? `0 0 8px ${t.primaryGlow}` : undefined,
                     }}
                   />
                 </div>
@@ -221,14 +258,34 @@ export default function FloorOutboundDetail({
           })}
         </FCard>
 
+        {/* Right column: status meta */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Cubby ETA */}
           <FCard t={t} padding={20}>
             <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-              <Cubby size={52} t={t} mood="happy" />
+              <Cubby
+                size={52}
+                t={t}
+                mood={
+                  order.status === "shipped"
+                    ? "happy"
+                    : order.status === "cancelled"
+                      ? "sleep"
+                      : "think"
+                }
+              />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <FPill t={t} tone="primary" size="sm">
-                  ETA · 14 MIN
+                <FPill
+                  t={t}
+                  tone={
+                    order.status === "shipped"
+                      ? "mint"
+                      : order.status === "cancelled"
+                        ? "coral"
+                        : "primary"
+                  }
+                  size="sm"
+                >
+                  {order.status}
                 </FPill>
                 <div
                   style={{
@@ -239,31 +296,10 @@ export default function FloorOutboundDetail({
                     lineHeight: 1.5,
                   }}
                 >
-                  Pickers on pace — ready by{" "}
-                  <strong style={{ color: t.ink }}>16:24</strong>, with a
-                  36-minute buffer.
+                  {statusBlurb(order)}
                 </div>
               </div>
             </div>
-          </FCard>
-
-          {/* Crew */}
-          <FCard t={t} padding={20}>
-            <div
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 10.5,
-                fontWeight: 800,
-                color: t.muted,
-                letterSpacing: 0.8,
-                textTransform: "uppercase",
-                marginBottom: 12,
-              }}
-            >
-              Crew
-            </div>
-            <CrewRow initials="MR" name="Maya Rivera" progress={0.6} count="9 / 15" />
-            <CrewRow initials="KT" name="Kenji Tanaka" progress={0.43} count="3 / 7" />
           </FCard>
 
           {/* Ship info */}
@@ -288,107 +324,75 @@ export default function FloorOutboundDetail({
                 gap: 14,
               }}
             >
-              <Stat label="Carrier" value="ODFL · LTL" />
-              <Stat label="Dock" value="D-02" />
-              <Stat label="Ship to" value="Tacoma · WA" />
-              <Stat label="Weight" value="312 kg" mono />
+              <Stat
+                label="Ship by"
+                value={
+                  order.shipBy
+                    ? new Date(order.shipBy).toLocaleString([], {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })
+                    : "—"
+                }
+                mono
+              />
+              <Stat
+                label="Shipped"
+                value={
+                  order.shippedAt
+                    ? new Date(order.shippedAt).toLocaleString([], {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })
+                    : "—"
+                }
+                mono
+              />
+              <Stat label="Customer" value={order.customer ?? "—"} />
+              <Stat label="Lines" value={String(lines.length)} mono />
             </div>
           </FCard>
         </div>
-      </div>
-
-      <div
-        style={{
-          marginTop: 24,
-          padding: "14px 18px",
-          background: t.surface,
-          border: `1px dashed ${t.border}`,
-          borderRadius: 12,
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          color: t.mutedSoft,
-          letterSpacing: 0.4,
-        }}
-      >
-        FLOOR MODE PREVIEW · mock data · later phase wires order.outbound({"{ref}"})
       </div>
     </FShell>
   );
 }
 
-function CrewRow({
-  initials,
-  name,
-  progress,
-  count,
-}: {
-  initials: string;
-  name: string;
-  progress: number;
-  count: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "30px 1fr 60px",
-        gap: 10,
-        padding: "8px 0",
-        alignItems: "center",
-        borderTop: `1px dashed ${t.border}`,
-      }}
-    >
-      <div
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 7,
-          background: t.primary,
-          color: t.primaryText,
-          fontFamily: FONTS.mono,
-          fontSize: 10.5,
-          fontWeight: 800,
-          display: "grid",
-          placeItems: "center",
-        }}
-      >
-        {initials}
-      </div>
-      <div>
-        <div style={{ fontSize: 12.5, color: t.ink, fontWeight: 600 }}>
-          {name}
-        </div>
-        <div
-          style={{
-            height: 4,
-            borderRadius: 2,
-            background: t.surfaceAlt,
-            overflow: "hidden",
-            marginTop: 4,
-          }}
-        >
-          <div
-            style={{
-              width: `${progress * 100}%`,
-              height: "100%",
-              background: t.primary,
-            }}
-          />
-        </div>
-      </div>
-      <span
-        style={{
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          fontWeight: 700,
-          color: t.muted,
-          textAlign: "right",
-        }}
-      >
-        {count}
-      </span>
-    </div>
-  );
+const ORDER_STEPS = ["open", "picking", "packed", "shipped"] as const;
+
+function statusBlurb(order: {
+  status: string;
+  shipBy: Date | null;
+  shippedAt: Date | null;
+  cancelledAt: Date | null;
+}): string {
+  if (order.status === "shipped" && order.shippedAt) {
+    return `Shipped ${formatRelative(new Date(order.shippedAt))}.`;
+  }
+  if (order.status === "cancelled" && order.cancelledAt) {
+    return `Cancelled ${formatRelative(new Date(order.cancelledAt))}.`;
+  }
+  if (order.status === "picking") {
+    return order.shipBy
+      ? `In picking — ships ${formatRelative(new Date(order.shipBy))}.`
+      : "In picking.";
+  }
+  if (order.status === "packed") return "Packed and staged for loading.";
+  if (order.status === "open") return "Open. Generate picks to allocate stock.";
+  return "Draft.";
+}
+
+function formatRelative(date: Date): string {
+  const diff = date.getTime() - Date.now();
+  const abs = Math.abs(diff);
+  const mins = Math.round(abs / 60_000);
+  if (mins < 60)
+    return diff > 0 ? `in ${mins}m` : `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24)
+    return diff > 0 ? `in ${hours}h` : `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return diff > 0 ? `in ${days}d` : `${days}d ago`;
 }
 
 function Stat({
