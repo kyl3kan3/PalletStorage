@@ -170,4 +170,59 @@ export const productRouter = router({
         .where(and(eq(schema.products.id, input.id), eq(schema.products.organizationId, orgId)));
       return { ok: true };
     }),
+
+  /**
+   * Generic product edit — sku, name, barcode, weight, velocity, price.
+   * Every field is optional; only the supplied fields get patched. The
+   * Products page uses this for inline edits beyond price (e.g. fixing
+   * a typo in a name or renaming an SKU). Duplicate-SKU collisions are
+   * turned into a friendly CONFLICT error.
+   */
+  update: tenantProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        sku: z.string().trim().min(1).nullable().optional(),
+        name: z.string().trim().min(1).optional(),
+        barcode: z.string().trim().nullable().optional(),
+        weightKg: z.number().positive().nullable().optional(),
+        velocityClass: z.enum(["A", "B", "C"]).nullable().optional(),
+        unitPriceCents: z.number().int().min(0).nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const patch: Partial<typeof schema.products.$inferInsert> = {};
+      if (input.sku !== undefined) patch.sku = input.sku;
+      if (input.name !== undefined) patch.name = input.name;
+      if (input.barcode !== undefined) patch.barcode = input.barcode;
+      if (input.weightKg !== undefined) {
+        patch.weightKg = input.weightKg == null ? null : input.weightKg.toString();
+      }
+      if (input.velocityClass !== undefined) patch.velocityClass = input.velocityClass;
+      if (input.unitPriceCents !== undefined) patch.unitPriceCents = input.unitPriceCents;
+      if (Object.keys(patch).length === 0) return { ok: true };
+      try {
+        await ctx.db
+          .update(schema.products)
+          .set(patch)
+          .where(
+            and(
+              eq(schema.products.id, input.id),
+              eq(schema.products.organizationId, orgId),
+            ),
+          );
+      } catch (e) {
+        if (isUniqueViolation(e)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: input.sku
+              ? `A product with SKU "${input.sku}" already exists.`
+              : "Update would create a duplicate.",
+          });
+        }
+        throw e;
+      }
+      return { ok: true };
+    }),
 });

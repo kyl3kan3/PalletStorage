@@ -192,8 +192,10 @@ export default function ProductsPage() {
 }
 
 /**
- * Inline-editable row. Price is the only field editable here for now —
- * SKU, name, barcode, weight are all set at product creation.
+ * Inline-editable row. SKU, name, and unit price can all be edited
+ * in place by clicking the value — Enter to save, Esc to cancel.
+ * Weight is set at create-time / via CSV import and left read-only
+ * here to keep the row uncluttered.
  */
 function ProductRow({
   product,
@@ -210,21 +212,13 @@ function ProductRow({
 }) {
   const t = theme;
   const utils = trpc.useUtils();
-  const setPrice = trpc.product.setPrice.useMutation({
+  const update = trpc.product.update.useMutation({
     onSuccess: () => utils.product.search.invalidate(),
   });
-  const [draft, setDraft] = useState(
-    product.unitPriceCents != null ? (product.unitPriceCents / 100).toFixed(2) : "",
-  );
-  const [editing, setEditing] = useState(false);
 
-  function commit() {
-    const parsed = draft.trim() === "" ? null : Math.round(Number.parseFloat(draft) * 100);
-    if (parsed != null && (Number.isNaN(parsed) || parsed < 0)) return;
-    setPrice.mutate({ id: product.id, unitPriceCents: parsed });
-    setEditing(false);
-  }
-
+  // Each editable cell tracks its own draft + edit-mode flag; we
+  // resync the draft whenever the row's underlying value changes
+  // (e.g. after a successful save) so we never display stale text.
   return (
     <div
       style={{
@@ -238,26 +232,38 @@ function ProductRow({
         color: t.body,
       }}
     >
-      <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
-        {product.sku ?? <span style={{ color: t.muted, fontWeight: 400 }}>—</span>}
-      </span>
-      <span>
-        {product.name}
+      <InlineText
+        value={product.sku ?? ""}
+        placeholder="(no SKU)"
+        mono
+        onSave={(next) =>
+          update.mutate({ id: product.id, sku: next.trim() || null })
+        }
+      />
+      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <InlineText
+          value={product.name}
+          placeholder="name"
+          onSave={(next) => {
+            const trimmed = next.trim();
+            if (trimmed && trimmed !== product.name) {
+              update.mutate({ id: product.id, name: trimmed });
+            }
+          }}
+        />
         {product.velocityClass && (
-          <span style={{ marginLeft: 8 }}>
-            <Tag
-              t={t}
-              tone={
-                product.velocityClass === "A"
-                  ? "primary"
-                  : product.velocityClass === "B"
-                    ? "sky"
-                    : "neutral"
-              }
-            >
-              {product.velocityClass}
-            </Tag>
-          </span>
+          <Tag
+            t={t}
+            tone={
+              product.velocityClass === "A"
+                ? "primary"
+                : product.velocityClass === "B"
+                  ? "sky"
+                  : "neutral"
+            }
+          >
+            {product.velocityClass}
+          </Tag>
         )}
       </span>
       <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: t.muted }}>
@@ -266,49 +272,177 @@ function ProductRow({
       <span style={{ fontFamily: FONTS.mono, color: t.ink, fontWeight: 600 }}>
         {product.weightKg ?? "—"}
       </span>
-      <span>
-        {editing ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            placeholder="0.00"
-            style={{
-              width: 90,
-              padding: "6px 10px",
-              borderRadius: 10,
-              background: t.surfaceAlt,
-              border: `1.5px solid ${t.border}`,
-              outline: "none",
-              fontFamily: FONTS.mono,
-              fontSize: 13,
-              color: t.ink,
-            }}
-          />
-        ) : (
-          <button
-            onClick={() => setEditing(true)}
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: 0,
-              cursor: "pointer",
-              fontFamily: FONTS.mono,
-              fontSize: 13,
-              color: product.unitPriceCents != null ? t.ink : t.muted,
-              fontWeight: 600,
-            }}
-          >
-            {product.unitPriceCents != null ? `$${(product.unitPriceCents / 100).toFixed(2)}` : "set…"}
-          </button>
-        )}
-      </span>
+      <InlinePrice
+        cents={product.unitPriceCents}
+        onSave={(cents) =>
+          update.mutate({ id: product.id, unitPriceCents: cents })
+        }
+      />
+      {update.error && (
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            fontSize: 11.5,
+            color: t.coral,
+            marginTop: 4,
+          }}
+        >
+          {update.error.message}
+        </div>
+      )}
     </div>
+  );
+}
+
+function InlineText({
+  value,
+  placeholder,
+  onSave,
+  mono = false,
+}: {
+  value: string;
+  placeholder: string;
+  onSave: (next: string) => void;
+  mono?: boolean;
+}) {
+  const t = theme;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  function commit() {
+    if (draft !== value) onSave(draft);
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "text",
+          textAlign: "left",
+          color: value ? t.ink : t.muted,
+          fontFamily: mono ? FONTS.mono : FONTS.sans,
+          fontWeight: 600,
+          fontSize: mono ? 13 : 13.5,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          minWidth: 0,
+          maxWidth: "100%",
+        }}
+        title={value || placeholder}
+      >
+        {value || placeholder}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setDraft(value);
+          setEditing(false);
+        }
+      }}
+      placeholder={placeholder}
+      style={{
+        width: "100%",
+        padding: "6px 10px",
+        borderRadius: 8,
+        background: t.surfaceAlt,
+        border: `1.5px solid ${t.border}`,
+        outline: "none",
+        fontFamily: mono ? FONTS.mono : FONTS.sans,
+        fontSize: 13,
+        color: t.ink,
+        minWidth: 0,
+      }}
+    />
+  );
+}
+
+function InlinePrice({
+  cents,
+  onSave,
+}: {
+  cents: number | null;
+  onSave: (next: number | null) => void;
+}) {
+  const t = theme;
+  const initial = cents != null ? (cents / 100).toFixed(2) : "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(initial);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
+      if (cents != null) onSave(null);
+    } else {
+      const n = Math.round(Number.parseFloat(trimmed) * 100);
+      if (Number.isFinite(n) && n >= 0 && n !== cents) onSave(n);
+    }
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(initial);
+          setEditing(true);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          fontFamily: FONTS.mono,
+          fontSize: 13,
+          color: cents != null ? t.ink : t.muted,
+          fontWeight: 600,
+        }}
+      >
+        {cents != null ? `$${(cents / 100).toFixed(2)}` : "set…"}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      placeholder="0.00"
+      style={{
+        width: 90,
+        padding: "6px 10px",
+        borderRadius: 10,
+        background: t.surfaceAlt,
+        border: `1.5px solid ${t.border}`,
+        outline: "none",
+        fontFamily: FONTS.mono,
+        fontSize: 13,
+        color: t.ink,
+      }}
+    />
   );
 }
 

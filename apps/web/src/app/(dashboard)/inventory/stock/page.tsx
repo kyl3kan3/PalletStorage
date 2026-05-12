@@ -13,6 +13,8 @@ import { Ic } from "~/components/icons";
  *     'do we have enough Vanilla to fill this order'.
  *   - By pallet: every pallet_item row with location/lpn/lot/expiry,
  *     so the operator can see exactly where stock physically lives.
+ *     Qty / lot / expiry on each row are click-to-edit; a qty change
+ *     records a movement with reason='adjust' for audit.
  *
  * Both views support a free-text search and a warehouse filter.
  * By-pallet adds a status filter so the dock pile (received but not
@@ -52,6 +54,12 @@ export default function StockPage() {
       utils.inventory.byProduct.invalidate();
     },
   });
+  const updateItem = trpc.pallet.updateItem.useMutation({
+    onSuccess: () => {
+      utils.inventory.byPallet.invalidate();
+      utils.inventory.byProduct.invalidate();
+    },
+  });
   const byProduct = trpc.inventory.byProduct.useQuery(
     {
       q,
@@ -84,7 +92,7 @@ export default function StockPage() {
       <PageTitle
         eyebrow="Stock on hand"
         title="Inventory"
-        subtitle="Everything the system thinks is in your warehouses, by product and by pallet."
+        subtitle="Everything the system thinks is in your warehouses, by product and by pallet. Click a qty, lot, or expiry cell on the By-pallet tab to edit in place."
       />
 
       <div
@@ -181,6 +189,21 @@ export default function StockPage() {
           </select>
         )}
       </div>
+
+      {updateItem.error && (
+        <div
+          style={{
+            marginBottom: 12,
+            background: t.coralSoft,
+            color: t.coral,
+            padding: "8px 12px",
+            borderRadius: 8,
+            fontSize: 12.5,
+          }}
+        >
+          {updateItem.error.message}
+        </div>
+      )}
 
       {tab === "product" && (
         <Card t={t} padding={0}>
@@ -311,17 +334,34 @@ export default function StockPage() {
                   {r.palletStatus}
                 </Tag>
               </div>
-              <div style={{ fontFamily: FONTS.mono, fontWeight: 600, color: t.ink }}>
-                {r.qty}
-              </div>
-              <div style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: t.muted }}>
-                {r.lot ?? "—"}
-              </div>
-              <div style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: t.muted }}>
-                {r.expiry
-                  ? new Date(r.expiry).toLocaleDateString()
-                  : "—"}
-              </div>
+              <EditableQty
+                t={t}
+                value={r.qty}
+                onSave={(next) =>
+                  updateItem.mutate({ palletItemId: r.palletItemId, qty: next })
+                }
+              />
+              <EditableText
+                t={t}
+                value={r.lot ?? ""}
+                placeholder="—"
+                onSave={(next) =>
+                  updateItem.mutate({
+                    palletItemId: r.palletItemId,
+                    lot: next.trim() || null,
+                  })
+                }
+              />
+              <EditableDate
+                t={t}
+                value={r.expiry ? new Date(r.expiry) : null}
+                onSave={(next) =>
+                  updateItem.mutate({
+                    palletItemId: r.palletItemId,
+                    expiry: next,
+                  })
+                }
+              />
               <div>
                 {(r.palletStatus === "received" ||
                   r.palletStatus === "in_transit") && (
@@ -450,4 +490,220 @@ function selectStyle(t: typeof theme): React.CSSProperties {
     fontFamily: FONTS.sans,
     cursor: "pointer",
   };
+}
+
+/**
+ * Click-to-edit qty cell. Saves a non-negative integer on Enter/blur.
+ * The server emits a movement row with reason='adjust' whenever the
+ * qty actually changes — see pallet.updateItem.
+ */
+function EditableQty({
+  t,
+  value,
+  onSave,
+}: {
+  t: typeof theme;
+  value: number;
+  onSave: (next: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+
+  function commit() {
+    const n = Number.parseInt(draft, 10);
+    if (Number.isFinite(n) && n >= 0 && n !== value) onSave(n);
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(String(value));
+          setEditing(true);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          fontFamily: FONTS.mono,
+          fontWeight: 600,
+          fontSize: 13,
+          color: t.ink,
+        }}
+        title="Click to adjust qty"
+      >
+        {value}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      type="number"
+      min={0}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      style={{
+        width: 70,
+        padding: "5px 8px",
+        borderRadius: 8,
+        background: t.surfaceAlt,
+        border: `1.5px solid ${t.border}`,
+        fontFamily: FONTS.mono,
+        fontSize: 12.5,
+        color: t.ink,
+      }}
+    />
+  );
+}
+
+function EditableText({
+  t,
+  value,
+  placeholder,
+  onSave,
+}: {
+  t: typeof theme;
+  value: string;
+  placeholder: string;
+  onSave: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  function commit() {
+    if (draft !== value) onSave(draft);
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "text",
+          textAlign: "left",
+          fontFamily: FONTS.mono,
+          fontSize: 11.5,
+          color: value ? t.body : t.muted,
+        }}
+      >
+        {value || placeholder}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      placeholder={placeholder}
+      style={{
+        width: "100%",
+        padding: "5px 8px",
+        borderRadius: 8,
+        background: t.surfaceAlt,
+        border: `1.5px solid ${t.border}`,
+        fontFamily: FONTS.mono,
+        fontSize: 12,
+        color: t.ink,
+      }}
+    />
+  );
+}
+
+function EditableDate({
+  t,
+  value,
+  onSave,
+}: {
+  t: typeof theme;
+  value: Date | null;
+  onSave: (next: Date | null) => void;
+}) {
+  const initial = value ? value.toISOString().slice(0, 10) : "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(initial);
+
+  function commit() {
+    if (draft === initial) {
+      setEditing(false);
+      return;
+    }
+    if (!draft) {
+      onSave(null);
+    } else {
+      const d = new Date(`${draft}T00:00:00Z`);
+      if (!Number.isNaN(d.getTime())) onSave(d);
+    }
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(initial);
+          setEditing(true);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          fontFamily: FONTS.mono,
+          fontSize: 11.5,
+          color: value ? t.body : t.muted,
+        }}
+      >
+        {value ? value.toLocaleDateString() : "—"}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      type="date"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      style={{
+        width: "100%",
+        padding: "4px 6px",
+        borderRadius: 8,
+        background: t.surfaceAlt,
+        border: `1.5px solid ${t.border}`,
+        fontFamily: FONTS.mono,
+        fontSize: 11.5,
+        color: t.ink,
+      }}
+    />
+  );
 }

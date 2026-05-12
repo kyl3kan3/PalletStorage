@@ -152,6 +152,86 @@ export const palletRouter = router({
       }));
     }),
 
+  /**
+   * Edit a single pallet_item line — qty, lot, expiry. Used by the
+   * inventory By-pallet view for in-place corrections (recount, lot
+   * fix, mis-keyed expiry). Any actual qty change writes a movement
+   * row with reason='adjust' and a note capturing the before→after so
+   * the inventory ledger has a paper trail; lot/expiry edits don't
+   * touch movements (the pallet still has the same physical units).
+   */
+  updateItem: tenantProcedure
+    .input(
+      z.object({
+        palletItemId: z.string().uuid(),
+        qty: z.number().int().min(0).optional(),
+        lot: z.string().trim().max(80).nullable().optional(),
+        expiry: z.date().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      return ctx.db.transaction(async (tx) => {
+        const [item] = await tx
+          .select()
+          .from(schema.palletItems)
+          .where(
+            and(
+              eq(schema.palletItems.id, input.palletItemId),
+              eq(schema.palletItems.organizationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (!item) throw new Error("Pallet item not found");
+
+        // Build the diff so we (a) skip a no-op update and (b) record
+        // a useful "before → after" note on the movement row.
+        const patch: Partial<typeof schema.palletItems.$inferInsert> = {};
+        if (input.qty !== undefined && input.qty !== item.qty) {
+          patch.qty = input.qty;
+        }
+        if (input.lot !== undefined && (input.lot ?? null) !== item.lot) {
+          patch.lot = input.lot;
+        }
+        if (
+          input.expiry !== undefined &&
+          (input.expiry ? input.expiry.getTime() : null) !==
+            (item.expiry ? new Date(item.expiry).getTime() : null)
+        ) {
+          patch.expiry = input.expiry;
+        }
+        if (Object.keys(patch).length === 0) {
+          return { ok: true, changed: false };
+        }
+
+        await tx
+          .update(schema.palletItems)
+          .set(patch)
+          .where(eq(schema.palletItems.id, item.id));
+
+        if (patch.qty !== undefined) {
+          const [pallet] = await tx
+            .select({
+              id: schema.pallets.id,
+              currentLocationId: schema.pallets.currentLocationId,
+            })
+            .from(schema.pallets)
+            .where(eq(schema.pallets.id, item.palletId))
+            .limit(1);
+          await tx.insert(schema.movements).values({
+            organizationId: orgId,
+            palletId: item.palletId,
+            fromLocationId: pallet?.currentLocationId ?? null,
+            toLocationId: pallet?.currentLocationId ?? null,
+            reason: "adjust",
+            notes: `qty ${item.qty} → ${patch.qty} on pallet_item ${item.id.slice(0, 8)}`,
+          });
+        }
+
+        return { ok: true, changed: true };
+      });
+    }),
+
   move: tenantProcedure
     .input(
       z.object({
