@@ -4,13 +4,14 @@
 // designer's kit.jsx. Every component takes an optional `t` theme prop;
 // callers typically omit it so the default light theme kicks in.
 
+import { useEffect, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   CSSProperties,
   InputHTMLAttributes,
   ReactNode,
 } from "react";
-import { theme as defaultTheme, FONTS, type Theme } from "~/lib/theme";
+import { theme as defaultTheme, FONTS, Cubby, type Theme } from "~/lib/theme";
 import { Ic, type IconProps } from "./icons";
 
 type Icon = (props: IconProps) => ReactNode;
@@ -66,9 +67,6 @@ export function Btn({
   return (
     <button
       {...rest}
-      // data-btn-size hands off to a globals.css rule that bumps `sm`
-      // to a 44px tap-target on mobile widths without re-rendering on
-      // resize. Desktop sizes are unchanged.
       data-btn-size={size}
       style={{
         display: "inline-flex",
@@ -132,10 +130,6 @@ export function Card({
   return (
     <div
       onClick={onClick}
-      // data-card lets responsive CSS target every Card — padding=0
-      // cards (our table wrappers) become horizontally scrollable on
-      // mobile and their inner fr-grids pick up a min-width so columns
-      // don't crush. See apps/web/src/app/globals.css.
       data-card=""
       data-card-flush={padding === 0 ? "" : undefined}
       style={{
@@ -493,17 +487,6 @@ export function Search({
 // ══════════════════════════════════════════════════════════════════
 // Floor-mode primitives (FBtn / FCard / FPill / KPI)
 // ══════════════════════════════════════════════════════════════════
-// Ported from Stacks/design_handoff_stacks_floor_mode/web-c-shell.jsx.
-// These are tuned for the dark "floor" theme: marigold-bold, mono-
-// numbers, dramatic glow on primary CTAs. They accept any Theme so a
-// page can render in light or floor mode by swapping the `t` prop, but
-// they read most natural on the floor palette.
-//
-// API mirrors Btn / Card / Tag so callers can swap them in or out in
-// the same JSX shape:
-//   <FBtn t={ft} variant="primary" icon={Ic.Scan}>Open scanner</FBtn>
-//   <FCard t={ft} padding={20} accent>…</FCard>
-//   <FPill t={ft} tone="mint">Picking</FPill>
 
 export type FBtnVariant = "primary" | "ghost" | "light" | "danger";
 
@@ -539,26 +522,9 @@ export function FBtn({
       border: t.primary,
       shadow: `0 8px 22px ${t.primaryGlow}, inset 0 -2px 0 rgba(0,0,0,.15)`,
     },
-    ghost: {
-      bg: "transparent",
-      fg: t.ink,
-      border: t.borderStrong,
-      shadow: "none",
-    },
-    // "light" is the white inverted button used for "SCAN TO CONFIRM"
-    // on mobile and the equivalent moments on web (rare).
-    light: {
-      bg: "#fff",
-      fg: "#0F0C0A",
-      border: "#fff",
-      shadow: "inset 0 -2px 0 rgba(0,0,0,.1)",
-    },
-    danger: {
-      bg: t.coralSoft,
-      fg: t.coral,
-      border: "rgba(255,107,91,.35)",
-      shadow: "none",
-    },
+    ghost: { bg: "transparent", fg: t.ink, border: t.borderStrong, shadow: "none" },
+    light: { bg: "#fff", fg: "#0F0C0A", border: "#fff", shadow: "inset 0 -2px 0 rgba(0,0,0,.1)" },
+    danger: { bg: t.coralSoft, fg: t.coral, border: "rgba(255,107,91,.35)", shadow: "none" },
   };
   const v = variants[variant];
   const Icon = icon;
@@ -598,8 +564,6 @@ export interface FCardProps {
   t?: Theme;
   children: ReactNode;
   padding?: number;
-  /** When true, adds a 2px marigold top-border accent — used for hot
-   *  cards (over-utilized warehouse, active dock door, etc.). */
   accent?: boolean;
   style?: CSSProperties;
   onClick?: () => void;
@@ -685,16 +649,6 @@ export function FPill({
   );
 }
 
-/**
- * Big KPI tile with mono headline number, optional suffix, delta, and
- * an 8-bar inline sparkline. Used in the Home and Operations KPI rows
- * (Received 284 / Shipped 412 / Dock-to-stock 47 min / On-time 96%).
- *
- *   <KPI t={ft} label="Received" value={284} delta="+8%" spark={[…]} />
- *
- * Spark bars are heights in percent (0–100). The last bar lights up in
- * marigold to mark the current period; earlier bars stay muted white.
- */
 export function KPI({
   t = defaultTheme,
   label,
@@ -712,9 +666,7 @@ export function KPI({
   suffix?: string;
   delta?: string;
   deltaTone?: "mint" | "coral";
-  /** Heights in % (0–100), one per bar. ~8 bars looks balanced. */
   spark?: number[];
-  /** Marigold top-border, like FCard's accent. */
   accent?: boolean;
   style?: CSSProperties;
 }) {
@@ -809,6 +761,159 @@ export function KPI({
       </div>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 5 polish primitives — Skeleton / EmptyState / LiveAgo
+// ══════════════════════════════════════════════════════════════════
+// Every floor-mode list page should render <Skeleton> rows while a
+// query is fetching, <EmptyState> when the query returns nothing, and
+// the page header should show <LiveAgo> next to the title to confirm
+// auto-refresh is happening. Per the handoff README: "Loading:
+// skeleton rows in t.surfaceAlt — 3 per list, no spinner. Empty:
+// Cubby mood='sleep' + friendly mono copy."
+
+export function Skeleton({
+  t = defaultTheme,
+  lines = 3,
+  rowHeight = 56,
+  gap = 12,
+}: {
+  t?: Theme;
+  lines?: number;
+  rowHeight?: number;
+  gap?: number;
+}) {
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap }}
+      role="status"
+      aria-label="Loading"
+    >
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          key={i}
+          className="kit-shimmer"
+          style={{
+            height: rowHeight,
+            borderRadius: 12,
+            background: t.surfaceAlt,
+            opacity: 0.6 + i * 0.1,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function EmptyState({
+  t = defaultTheme,
+  title = "Nothing here yet. Quiet shift.",
+  hint,
+  cta,
+}: {
+  t?: Theme;
+  title?: string;
+  hint?: string;
+  cta?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 14,
+        padding: "36px 20px",
+        textAlign: "center",
+      }}
+    >
+      <Cubby size={64} t={t} mood="sleep" />
+      <div
+        style={{
+          fontFamily: FONTS.mono,
+          fontSize: 12,
+          fontWeight: 800,
+          color: t.muted,
+          letterSpacing: 0.8,
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </div>
+      {hint && (
+        <div
+          style={{
+            fontSize: 13,
+            color: t.mutedSoft,
+            maxWidth: 360,
+            lineHeight: 1.5,
+          }}
+        >
+          {hint}
+        </div>
+      )}
+      {cta && <div style={{ marginTop: 6 }}>{cta}</div>}
+    </div>
+  );
+}
+
+export function LiveAgo({
+  t = defaultTheme,
+  updatedAt,
+  prefix = "Updated",
+}: {
+  t?: Theme;
+  updatedAt?: number | Date;
+  prefix?: string;
+}) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontFamily: FONTS.mono,
+        fontSize: 11,
+        color: t.muted,
+        letterSpacing: 0.4,
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 3,
+          background: t.mint,
+          boxShadow: `0 0 6px ${t.mint}`,
+        }}
+      />
+      {prefix} <RelativeTime epochMs={normalizeEpoch(updatedAt)} />
+    </span>
+  );
+}
+
+function normalizeEpoch(v: number | Date | undefined): number {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "number") return v;
+  return Date.now();
+}
+
+function RelativeTime({ epochMs }: { epochMs: number }) {
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (now === 0) return <span>--</span>;
+  const seconds = Math.max(0, Math.round((now - epochMs) / 1000));
+  if (seconds < 1) return <span>just now</span>;
+  if (seconds < 60) return <span>{seconds}s ago</span>;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return <span>{minutes}m ago</span>;
+  const hours = Math.round(minutes / 60);
+  return <span>{hours}h ago</span>;
 }
 
 // ───────────────────────── PageTitle ──────────────────────
