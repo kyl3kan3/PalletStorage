@@ -496,6 +496,10 @@ function selectStyle(t: typeof theme): React.CSSProperties {
  * Click-to-edit qty cell. Saves a non-negative integer on Enter/blur.
  * The server emits a movement row with reason='adjust' whenever the
  * qty actually changes — see pallet.updateItem.
+ *
+ * The button fills the grid cell so clicking anywhere in the column
+ * starts the edit, not just the digits themselves. On hover the cell
+ * gets a marigold dashed underline to advertise that it's editable.
  */
 function EditableQty({
   t,
@@ -523,16 +527,20 @@ function EditableQty({
           setDraft(String(value));
           setEditing(true);
         }}
+        className="inline-edit-cell"
         style={{
+          width: "100%",
           background: "transparent",
           border: "none",
-          padding: 0,
+          padding: "5px 6px",
           cursor: "pointer",
           textAlign: "left",
           fontFamily: FONTS.mono,
-          fontWeight: 600,
+          fontWeight: 700,
           fontSize: 13,
           color: t.ink,
+          borderRadius: 6,
+          borderBottom: `1.5px dashed transparent`,
         }}
         title="Click to adjust qty"
       >
@@ -553,14 +561,15 @@ function EditableQty({
         if (e.key === "Escape") setEditing(false);
       }}
       style={{
-        width: 70,
+        width: "100%",
         padding: "5px 8px",
         borderRadius: 8,
         background: t.surfaceAlt,
-        border: `1.5px solid ${t.border}`,
+        border: `1.5px solid ${t.primary}`,
         fontFamily: FONTS.mono,
         fontSize: 12.5,
         color: t.ink,
+        outline: "none",
       }}
     />
   );
@@ -593,16 +602,21 @@ function EditableText({
           setDraft(value);
           setEditing(true);
         }}
+        className="inline-edit-cell"
         style={{
+          width: "100%",
           background: "transparent",
           border: "none",
-          padding: 0,
-          cursor: "text",
+          padding: "5px 6px",
+          cursor: "pointer",
           textAlign: "left",
           fontFamily: FONTS.mono,
           fontSize: 11.5,
           color: value ? t.body : t.muted,
+          borderRadius: 6,
+          borderBottom: `1.5px dashed transparent`,
         }}
+        title="Click to edit lot"
       >
         {value || placeholder}
       </button>
@@ -624,10 +638,11 @@ function EditableText({
         padding: "5px 8px",
         borderRadius: 8,
         background: t.surfaceAlt,
-        border: `1.5px solid ${t.border}`,
+        border: `1.5px solid ${t.primary}`,
         fontFamily: FONTS.mono,
         fontSize: 12,
         color: t.ink,
+        outline: "none",
       }}
     />
   );
@@ -668,16 +683,21 @@ function EditableDate({
           setDraft(initial);
           setEditing(true);
         }}
+        className="inline-edit-cell"
         style={{
+          width: "100%",
           background: "transparent",
           border: "none",
-          padding: 0,
+          padding: "5px 6px",
           cursor: "pointer",
           textAlign: "left",
           fontFamily: FONTS.mono,
           fontSize: 11.5,
           color: value ? t.body : t.muted,
+          borderRadius: 6,
+          borderBottom: `1.5px dashed transparent`,
         }}
+        title="Click to edit expiry"
       >
         {value ? value.toLocaleDateString() : "—"}
       </button>
@@ -699,10 +719,11 @@ function EditableDate({
         padding: "4px 6px",
         borderRadius: 8,
         background: t.surfaceAlt,
-        border: `1.5px solid ${t.border}`,
+        border: `1.5px solid ${t.primary}`,
         fontFamily: FONTS.mono,
         fontSize: 11.5,
         color: t.ink,
+        outline: "none",
       }}
     />
   );

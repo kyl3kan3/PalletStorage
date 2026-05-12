@@ -138,3 +138,15 @@ div {
     line-height: 1.1 !important;
   }
 }
+
+/* Inline-edit affordance — used by the stock-on-hand qty / lot / expiry
+ * cells. On hover, the cell gets a marigold-tinted background + dashed
+ * underline so it's obvious the value is editable. Without this, the
+ * raw text looks identical to read-only labels and operators don't
+ * realize they can click. */
+.inline-edit-cell:hover,
+.inline-edit-cell:focus-visible {
+  background: rgba(255, 178, 62, 0.08) !important;
+  border-bottom-color: #e88f10 !important;
+  outline: none;
+}

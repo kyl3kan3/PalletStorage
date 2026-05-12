@@ -241,7 +241,7 @@ function CrewStack({ initials }: { initials: string[] }) {
   );
 }
 
-export function PreviewBanner({ what }: { what: string }) {
+function PreviewBanner({ what }: { what: string }) {
   return (
     <div
       style={{
