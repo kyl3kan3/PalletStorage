@@ -215,6 +215,8 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const hasShort = lines.some((l) => l.qtyReceived < l.qtyExpected);
+  const hasStarted = lines.some((l) => l.qtyReceived > 0);
+  const isUnderReceived = hasStarted && hasShort;
   const status = order?.status ?? "…";
   const isTerminal = status === "closed" || status === "cancelled";
   const isManager = useIsManager();
@@ -944,6 +946,8 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <Card t={t} padding={0}>
             <div
+              data-pallet-row
+              data-pallet-row-header
               style={{
                 display: "grid",
                 gridTemplateColumns: "120px 110px 1fr 240px",
@@ -967,6 +971,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               return (
                 <div
                   key={p.palletId}
+                  data-pallet-row
                   style={{
                     display: "grid",
                     gridTemplateColumns: "120px 110px 1fr 240px",
@@ -1085,7 +1090,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
         <div data-collapse-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
           <Card t={t}>
             <div style={{ fontWeight: 600, color: t.ink, marginBottom: 8 }}>Close order</div>
-            {hasShort && (
+            {isUnderReceived && (
               <div
                 style={{
                   marginBottom: 10,
@@ -1124,7 +1129,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               );
             })()}
-            {hasShort && (
+            {isUnderReceived && (
               <div style={{ marginBottom: 10 }}>
                 <ReasonPicker
                   t={t}
@@ -1140,7 +1145,7 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
               variant="primary"
               size="md"
               icon={Ic.Check}
-              disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
+              disabled={closeOrder.isPending || (isUnderReceived && !closeReason.trim())}
               onClick={() =>
                 closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
               }
@@ -1195,14 +1200,14 @@ export default function InboundDetailPage({ params }: { params: Promise<{ id: st
             variant="accent"
             size="md"
             icon={Ic.Check}
-            disabled={closeOrder.isPending || (hasShort && !closeReason.trim())}
+            disabled={closeOrder.isPending || (isUnderReceived && !closeReason.trim())}
             onClick={() =>
               closeOrder.mutate({ id, closeReason: closeReason.trim() || undefined })
             }
           >
             {closeOrder.isPending
               ? "Closing…"
-              : hasShort
+              : isUnderReceived
                 ? "Short-close"
                 : "Close order"}
           </Btn>
