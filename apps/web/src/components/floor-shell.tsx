@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Route } from "next";
-import type { ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { floorTheme as ft, FONTS, Cubby } from "~/lib/theme";
 import { FBtn, FPill } from "./kit";
 import { Ic, type IconProps } from "./icons";
 import { useCmdK } from "./cmdk-palette";
+import { useMatchMedia } from "~/lib/useMatchMedia";
 
 /**
  * FShell — the floor-mode dashboard chrome.
@@ -92,6 +93,43 @@ export function FShell({
 }) {
   const t = ft;
   const pathname = usePathname() ?? "/";
+  const isMobile = useMatchMedia("(max-width: 1023px)");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerId = useId();
+
+  // Close the drawer whenever the route changes.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
+  // If the viewport grows past mobile while the drawer is open,
+  // reset state so it doesn't reappear when the user shrinks back.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  // Escape key closes the drawer for keyboard users.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
+  // Lock body scroll while the drawer is open on mobile so the page
+  // behind the backdrop doesn't scroll when the operator drags.
+  useEffect(() => {
+    if (drawerOpen && isMobile) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [drawerOpen, isMobile]);
+
   // Auto-detect active nav by longest-prefix match against the current
   // pathname so /floor/inbound/123 still highlights "Inbound". The
   // "home" entry (/floor) has the shortest href, so by sorting
@@ -219,36 +257,142 @@ export function FShell({
         <FloorLiveStatus />
       </aside>
 
+      {/* Mobile drawer + backdrop. Renders only when the hamburger is
+          open and we're on a mobile viewport. Reuses the same NAV /
+          ADMIN_NAV items + live status footer as the desktop sidebar
+          so there's a single source of truth for the floor nav. */}
+      {isMobile && drawerOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setDrawerOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 12, 10, 0.55)",
+              zIndex: 30,
+              border: "none",
+              cursor: "pointer",
+            }}
+          />
+          <aside
+            data-fshell-drawer
+            id={drawerId}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Floor navigation"
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: 272,
+              maxWidth: "85vw",
+              background: t.bgAlt,
+              borderRight: `1px solid ${t.border}`,
+              padding: "22px 14px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              zIndex: 31,
+              boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                padding: "4px 10px 18px",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Cubby size={26} t={t} />
+              <span
+                style={{
+                  fontFamily: FONTS.display,
+                  fontStyle: "italic",
+                  fontSize: 20,
+                  fontWeight: 600,
+                  color: t.ink,
+                  letterSpacing: -0.5,
+                }}
+              >
+                stacks<span style={{ color: t.primary }}>.</span>
+              </span>
+              <span
+                style={{
+                  marginLeft: "auto",
+                  fontFamily: FONTS.mono,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: t.primary,
+                  letterSpacing: 1,
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: t.primarySoft,
+                  border: "1px solid rgba(255,178,62,.3)",
+                }}
+              >
+                OPS
+              </span>
+            </div>
+
+            <div
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 9.5,
+                fontWeight: 700,
+                color: t.mutedSoft,
+                padding: "6px 10px",
+                letterSpacing: 1.2,
+                textTransform: "uppercase",
+              }}
+            >
+              Workspace
+            </div>
+            {NAV.map((n) => (
+              <FloorNavLink
+                key={n.key}
+                item={n}
+                active={activeKey === n.key}
+                t={t}
+                onNavigate={() => setDrawerOpen(false)}
+              />
+            ))}
+
+            <div
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 9.5,
+                fontWeight: 700,
+                color: t.mutedSoft,
+                padding: "14px 10px 6px",
+                letterSpacing: 1.2,
+                textTransform: "uppercase",
+              }}
+            >
+              Admin
+            </div>
+            {ADMIN_NAV.map((n) => (
+              <FloorNavLink
+                key={n.key}
+                item={n}
+                active={activeKey === n.key}
+                t={t}
+                onNavigate={() => setDrawerOpen(false)}
+              />
+            ))}
+
+            <div style={{ flex: 1 }} />
+            <FloorLiveStatus />
+          </aside>
+        </>
+      )}
+
       {/* ─── Main column ──────────────────────────── */}
       <main style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Mobile-only nav strip — hidden by CSS at ≥1024px. Horizontal
-            scrolling list of the same nav targets the sidebar uses on
-            desktop, so the floor pages stay reachable from a phone. */}
-        <nav
-          data-fshell-mobile-nav
-          style={{
-            display: "none",
-            gap: 6,
-            padding: "10px 14px",
-            overflowX: "auto",
-            WebkitOverflowScrolling: "touch",
-            background: t.bgAlt,
-            borderBottom: `1px solid ${t.border}`,
-            position: "sticky",
-            top: 0,
-            zIndex: 3,
-          }}
-        >
-          {NAV.map((n) => (
-            <FloorMobileNavLink
-              key={n.key}
-              item={n}
-              active={activeKey === n.key}
-              t={t}
-            />
-          ))}
-        </nav>
-
         {/* Top bar */}
         <div
           data-fshell-topbar
@@ -264,6 +408,33 @@ export function FShell({
             zIndex: 2,
           }}
         >
+          {/* Hamburger menu — visible only on mobile (CSS hides it
+              ≥1024px). Opens the drawer that mirrors the desktop
+              sidebar so the floor pages stay reachable from a phone. */}
+          <button
+            type="button"
+            data-fshell-hamburger
+            aria-label="Open menu"
+            aria-expanded={drawerOpen}
+            aria-controls={drawerId}
+            onClick={() => setDrawerOpen(true)}
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              color: t.ink,
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <HamburgerIcon color={t.ink} />
+          </button>
+
           {/* Search slot — clicking it (or hitting ⌘K anywhere) opens
               the command palette. Looks like an input but isn't —
               keeps the real text-entry to a focus-trapped overlay. */}
@@ -442,15 +613,20 @@ function FloorNavLink({
   item,
   active,
   t,
+  onNavigate,
 }: {
   item: NavItem;
   active: boolean;
   t: typeof ft;
+  /** Called on click so the drawer can close even when the user
+   * taps the already-active route. */
+  onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       style={{
         display: "flex",
         alignItems: "center",
@@ -504,43 +680,24 @@ function FloorNavLink({
 }
 
 /**
- * Pill-shaped nav link rendered in the mobile-only horizontal nav
- * strip. Icon + label, compact, with a primary-tinted background when
- * active. Hidden on desktop via the `data-fshell-mobile-nav` CSS.
+ * Three-line hamburger glyph rendered inside the top-bar button on
+ * mobile. Stroke-only, no fill, scaled to fit a 38px touch target.
  */
-function FloorMobileNavLink({
-  item,
-  active,
-  t,
-}: {
-  item: NavItem;
-  active: boolean;
-  t: typeof ft;
-}) {
-  const Icon = item.icon;
+function HamburgerIcon({ color }: { color: string }) {
   return (
-    <Link
-      href={item.href}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "8px 12px",
-        borderRadius: 999,
-        background: active ? t.primarySoft : t.surface,
-        border: `1px solid ${active ? "rgba(255,178,62,.35)" : t.border}`,
-        color: active ? t.primary : t.body,
-        fontSize: 12.5,
-        fontWeight: 700,
-        letterSpacing: -0.1,
-        textDecoration: "none",
-        flexShrink: 0,
-        whiteSpace: "nowrap",
-      }}
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke={color}
+      strokeWidth={1.8}
+      strokeLinecap="round"
     >
-      <Icon size={14} color={active ? t.primary : t.muted} />
-      {item.label}
-    </Link>
+      <line x1={2} y1={5} x2={16} y2={5} />
+      <line x1={2} y1={9} x2={16} y2={9} />
+      <line x1={2} y1={13} x2={16} y2={13} />
+    </svg>
   );
 }
 
