@@ -97,6 +97,21 @@ body {
   [data-collapse-grid]:not([data-no-collapse]) {
     grid-template-columns: repeat(2, 1fr) !important;
   }
+
+  /* Pallet rows on the inbound detail page: the desktop 4-col grid
+   * (LPN / Status / Location / Action) pushes the Action column —
+   * which holds the put-away rack <select> — off-screen on phones.
+   * Stack vertically so the dropdown becomes a normal full-width
+   * tap target, and drop the header row (column labels don't make
+   * sense once each cell is on its own line). */
+  [data-pallet-row-header] {
+    display: none !important;
+  }
+  [data-pallet-row]:not([data-pallet-row-header]) {
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
+    align-items: stretch !important;
+  }
 }
 
 @media (max-width: 639px) {
