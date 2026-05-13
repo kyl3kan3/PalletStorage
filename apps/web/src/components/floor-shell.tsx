@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Route } from "next";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { floorTheme as ft, FONTS, Cubby } from "~/lib/theme";
 import { FBtn, FPill } from "./kit";
 import { Ic, type IconProps } from "./icons";
@@ -95,6 +95,7 @@ export function FShell({
   const pathname = usePathname() ?? "/";
   const isMobile = useMatchMedia("(max-width: 1023px)");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerId = useId();
 
   // Close the drawer whenever the route changes.
   useEffect(() => {
@@ -277,6 +278,7 @@ export function FShell({
           />
           <aside
             data-fshell-drawer
+            id={drawerId}
             role="dialog"
             aria-modal="true"
             aria-label="Floor navigation"
@@ -413,6 +415,8 @@ export function FShell({
             type="button"
             data-fshell-hamburger
             aria-label="Open menu"
+            aria-expanded={drawerOpen}
+            aria-controls={drawerId}
             onClick={() => setDrawerOpen(true)}
             style={{
               display: "none",
