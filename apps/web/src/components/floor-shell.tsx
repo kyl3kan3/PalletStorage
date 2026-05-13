@@ -105,6 +105,7 @@ export function FShell({
 
   return (
     <div
+      data-fshell
       style={{
         minHeight: "100vh",
         display: "grid",
@@ -116,6 +117,7 @@ export function FShell({
     >
       {/* ─── Sidebar ─────────────────────────────── */}
       <aside
+        data-fshell-sidebar
         style={{
           background: t.bgAlt,
           borderRight: `1px solid ${t.border}`,
@@ -219,8 +221,37 @@ export function FShell({
 
       {/* ─── Main column ──────────────────────────── */}
       <main style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        {/* Mobile-only nav strip — hidden by CSS at ≥1024px. Horizontal
+            scrolling list of the same nav targets the sidebar uses on
+            desktop, so the floor pages stay reachable from a phone. */}
+        <nav
+          data-fshell-mobile-nav
+          style={{
+            display: "none",
+            gap: 6,
+            padding: "10px 14px",
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            background: t.bgAlt,
+            borderBottom: `1px solid ${t.border}`,
+            position: "sticky",
+            top: 0,
+            zIndex: 3,
+          }}
+        >
+          {NAV.map((n) => (
+            <FloorMobileNavLink
+              key={n.key}
+              item={n}
+              active={activeKey === n.key}
+              t={t}
+            />
+          ))}
+        </nav>
+
         {/* Top bar */}
         <div
+          data-fshell-topbar
           style={{
             display: "flex",
             alignItems: "center",
@@ -282,8 +313,8 @@ export function FShell({
 
         {/* Page title block */}
         {(title || eyebrow) && (
-          <div style={{ padding: "24px 28px 14px" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+          <div data-fshell-title style={{ padding: "24px 28px 14px" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {eyebrow && (
                   <div
@@ -316,6 +347,7 @@ export function FShell({
                   }}
                 >
                   <h1
+                    data-fshell-h1
                     style={{
                       margin: 0,
                       fontFamily: FONTS.sans,
@@ -400,7 +432,7 @@ export function FShell({
           </div>
         )}
 
-        <div style={{ flex: 1, padding: "0 28px 28px" }}>{children}</div>
+        <div data-fshell-body style={{ flex: 1, padding: "0 28px 28px" }}>{children}</div>
       </main>
     </div>
   );
@@ -472,6 +504,47 @@ function FloorNavLink({
 }
 
 /**
+ * Pill-shaped nav link rendered in the mobile-only horizontal nav
+ * strip. Icon + label, compact, with a primary-tinted background when
+ * active. Hidden on desktop via the `data-fshell-mobile-nav` CSS.
+ */
+function FloorMobileNavLink({
+  item,
+  active,
+  t,
+}: {
+  item: NavItem;
+  active: boolean;
+  t: typeof ft;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "8px 12px",
+        borderRadius: 999,
+        background: active ? t.primarySoft : t.surface,
+        border: `1px solid ${active ? "rgba(255,178,62,.35)" : t.border}`,
+        color: active ? t.primary : t.body,
+        fontSize: 12.5,
+        fontWeight: 700,
+        letterSpacing: -0.1,
+        textDecoration: "none",
+        flexShrink: 0,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <Icon size={14} color={active ? t.primary : t.muted} />
+      {item.label}
+    </Link>
+  );
+}
+
+/**
  * Live status footer in the sidebar. Shows a green pulse + on-floor
  * count + warehouse + current time + shift. Pure cosmetic for now —
  * later phases hook this to a `home.summary` tRPC query.
@@ -518,6 +591,7 @@ function SearchSlot() {
     <button
       type="button"
       onClick={open}
+      data-fshell-search
       style={{
         display: "inline-flex",
         alignItems: "center",

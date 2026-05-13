@@ -41,7 +41,10 @@ export default function FloorInventoryPreview() {
       title="What are we looking at?"
       subtitle="LPN · SKU · location · order"
     >
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 16 }}>
+      <div
+        data-collapse-grid
+        style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 16 }}
+      >
         {/* Hero scan field */}
         <FCard t={t} padding={22}>
           <div
@@ -175,6 +178,7 @@ export default function FloorInventoryPreview() {
 
             {/* Metadata */}
             <div
+              data-collapse-grid
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
