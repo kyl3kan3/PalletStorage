@@ -176,6 +176,7 @@ export default function FloorHomePreview() {
     >
       {/* Row 1: Hero + Needs you */}
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "1.5fr 1fr",
@@ -184,7 +185,10 @@ export default function FloorHomePreview() {
         }}
       >
         <FCard t={t} padding={24}>
-          <div style={{ display: "flex", gap: 24, alignItems: "stretch" }}>
+          <div
+            data-floor-hero-row
+            style={{ display: "flex", gap: 24, alignItems: "stretch", flexWrap: "wrap" }}
+          >
             <div style={{ flex: 1, minWidth: 0 }}>
               <FPill t={t} tone="primary">
                 THROUGHPUT · LAST 8 DAYS
@@ -236,6 +240,7 @@ export default function FloorHomePreview() {
             </div>
             {/* Sparkline panel */}
             <div
+              data-floor-spark
               style={{
                 width: 180,
                 padding: "14px 16px",
@@ -380,6 +385,7 @@ export default function FloorHomePreview() {
 
       {/* Row 2: KPI row */}
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -409,7 +415,10 @@ export default function FloorHomePreview() {
       </div>
 
       {/* Row 3: Active waves + Cubby ops */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+      <div
+        data-collapse-grid
+        style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
+      >
         <FCard t={t} padding={0}>
           <div
             style={{

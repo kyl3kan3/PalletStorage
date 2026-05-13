@@ -68,6 +68,7 @@ export default function FloorOutboundList() {
       onTabChange={setTab}
     >
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",

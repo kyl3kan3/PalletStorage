@@ -29,6 +29,48 @@ body {
     min-width: 720px;
   }
 
+  /* Floor-mode shell collapses to a single column on tablet/phone.
+   * The desktop sidebar gets hidden in favor of a slim horizontal
+   * nav strip at the top of the main column. Paddings tighten so
+   * the content actually fits on a phone viewport. */
+  [data-fshell] {
+    grid-template-columns: 1fr !important;
+  }
+  [data-fshell-sidebar] {
+    display: none !important;
+  }
+  [data-fshell-mobile-nav] {
+    display: flex !important;
+  }
+  [data-fshell-topbar] {
+    padding: 10px 14px !important;
+    flex-wrap: wrap;
+  }
+  [data-fshell-search] {
+    width: 100% !important;
+  }
+  [data-fshell-title] {
+    padding: 18px 14px 10px !important;
+  }
+  [data-fshell-h1] {
+    font-size: 26px !important;
+    letter-spacing: -0.8px !important;
+    line-height: 1.1 !important;
+  }
+  [data-fshell-body] {
+    padding: 0 14px 20px !important;
+  }
+
+  /* /floor home hero card: text column + sparkline panel stack
+   * vertically and the sparkline stretches full-width. */
+  [data-floor-hero-row] {
+    flex-direction: column !important;
+    gap: 16px !important;
+  }
+  [data-floor-spark] {
+    width: 100% !important;
+  }
+
   /* PageTitle's right-side action cluster drops below the title on
    * narrow screens instead of pushing the title off the page. */
   [data-page-title] > div:first-child {
@@ -61,6 +103,22 @@ body {
   /* Very small phones — collapse all grids to a single column. */
   [data-collapse-grid]:not([data-no-collapse]) {
     grid-template-columns: 1fr !important;
+  }
+
+  /* Pull FShell paddings in even further on tiny phones. The 14px
+   * gutter at 1023px still feels generous next to 360px-wide bodies;
+   * 10px is plenty given each card already has its own padding. */
+  [data-fshell-topbar],
+  [data-fshell-title] {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+  [data-fshell-body] {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+  [data-fshell-h1] {
+    font-size: 22px !important;
   }
 
   /* Hide the Clerk org switcher label on tiny screens to save space. */

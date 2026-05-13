@@ -58,7 +58,10 @@ export default function FloorWarehousesGrid() {
       }
     >
       {loading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+        <div
+          data-collapse-grid
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}
+        >
           <Skeleton t={t} lines={1} rowHeight={220} />
           <Skeleton t={t} lines={1} rowHeight={220} />
         </div>
@@ -72,6 +75,7 @@ export default function FloorWarehousesGrid() {
         </FCard>
       ) : (
         <div
+          data-collapse-grid
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",

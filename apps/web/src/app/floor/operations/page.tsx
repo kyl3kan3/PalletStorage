@@ -77,6 +77,7 @@ export default function FloorOperationsPreview() {
     >
       {/* KPI row */}
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -107,6 +108,7 @@ export default function FloorOperationsPreview() {
 
       {/* Throughput chart + Dock-to-stock ring */}
       <div
+        data-collapse-grid
         style={{
           display: "grid",
           gridTemplateColumns: "2fr 1fr",
@@ -319,7 +321,10 @@ export default function FloorOperationsPreview() {
       </div>
 
       {/* Top stock + Ledger */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}>
+      <div
+        data-collapse-grid
+        style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}
+      >
         <FCard t={t} padding={0}>
           <div
             style={{
