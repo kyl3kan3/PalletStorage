@@ -39,8 +39,8 @@ body {
   [data-fshell-sidebar] {
     display: none !important;
   }
-  [data-fshell-mobile-nav] {
-    display: flex !important;
+  [data-fshell-hamburger] {
+    display: inline-flex !important;
   }
   [data-fshell-topbar] {
     padding: 10px 14px !important;
