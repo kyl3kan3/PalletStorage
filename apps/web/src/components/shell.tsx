@@ -23,7 +23,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Today", icon: Ic.Home },
+  { href: "/" as Route, label: "Today", icon: Ic.Home },
   { href: "/schedule" as Route, label: "Schedule", icon: Ic.Calendar },
   { href: "/inbound", label: "Inbound", icon: Ic.Inbound },
   { href: "/outbound", label: "Outbound", icon: Ic.Outbound },
@@ -37,9 +37,10 @@ function activeHref(pathname: string): string | null {
   let best: string | null = null;
   let bestLen = -1;
   for (const n of NAV) {
+    const href = n.href as string;
     const match =
-      pathname === n.href ||
-      (n.href !== "/" && pathname.startsWith(`${n.href}/`));
+      pathname === href ||
+      (href !== "/" && pathname.startsWith(`${href}/`));
     if (match && n.href.length > bestLen) {
       best = n.href;
       bestLen = n.href.length;
@@ -177,7 +178,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
           {/* Brand mark on mobile; search on desktop. */}
           {isMobile ? (
-            <Link href="/" style={{ textDecoration: "none" }}>
+            <Link href={"/" as Route} style={{ textDecoration: "none" }}>
               <Wordmark t={t} size={18} />
             </Link>
           ) : (
@@ -236,7 +237,7 @@ function Sidebar({ pathname }: { pathname: string }) {
   return (
     <>
       <div style={{ padding: "6px 8px 18px" }}>
-        <Link href="/" style={{ textDecoration: "none" }}>
+        <Link href={"/" as Route} style={{ textDecoration: "none" }}>
           <Wordmark t={t} size={20} />
         </Link>
       </div>
