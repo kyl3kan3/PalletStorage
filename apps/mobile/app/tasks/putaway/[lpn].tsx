@@ -1,40 +1,68 @@
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useMemo } from "react";
 import { Frame } from "../../../src/components/Frame";
 import { Btn } from "../../../src/components/Btn";
 import { Pill } from "../../../src/components/Pill";
 import { Cubby } from "../../../src/components/Cubby";
+import { Skeleton } from "../../../src/components/Skeleton";
+import { EmptyState } from "../../../src/components/EmptyState";
 import { theme as t, FONTS } from "../../../src/lib/theme";
+import { trpc } from "../../../src/lib/trpc";
 
 /**
- * Putaway suggest screen — same hero pattern as Pick (64px mono
- * location code on a marigold card), but with alternatives below and
- * a confidence chip. Bottom action is "SCAN LOCATION" + ghost
- * "OVERRIDE LOCATION".
+ * Putaway suggest screen.
  *
- * Mock data; later phase wires putaway.suggest({ palletId }) +
- * putaway.commit({ palletId, locationCode }).
+ * Wires:
+ *   - pallet.byLpn → pallet header + contents (lpn, weight, items)
+ *   - pallet.putawayQueue → suggested rack for this LPN (server picks
+ *     the first available rack in the same warehouse; smarter directed
+ *     putaway is a later layer)
+ *
+ * Primary card shows the suggested rack. SCAN LOCATION calls
+ * pallet.move with reason='putaway'.
  */
-
-interface Suggestion {
-  loc: string;
-  confidence: number;
-  reason: string;
-}
-
-const PRIMARY: Suggestion = {
-  loc: "A3-04-C",
-  confidence: 94,
-  reason: "Same lot already there · empty bay",
-};
-
-const ALTS: Suggestion[] = [
-  { loc: "A3-02-B", confidence: 81, reason: "Same product zone · 2 free slots" },
-  { loc: "C1-04-A", confidence: 68, reason: "Bulk zone · plenty of space" },
-];
 
 export default function PutawayScreen() {
   const { lpn } = useLocalSearchParams<{ lpn: string }>();
+
+  const pallet = trpc.pallet.byLpn.useQuery(
+    { lpn: lpn ?? "" },
+    { enabled: !!lpn, refetchInterval: 30_000 },
+  );
+  const queue = trpc.pallet.putawayQueue.useQuery({}, { refetchInterval: 30_000 });
+
+  const queueRow = useMemo(
+    () => (queue.data ?? []).find((q) => q.lpn === lpn),
+    [queue.data, lpn],
+  );
+
+  if (pallet.isLoading) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <Skeleton lines={4} rowHeight={80} />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  if (!pallet.data) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <EmptyState
+            title="Pallet not found"
+            hint={`No pallet matched ${lpn ?? "this LPN"}.`}
+          />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  const { pallet: p, items } = pallet.data;
+  const skuCount = items.length;
+  const totalUnits = items.reduce((n, i) => n + i.qty, 0);
 
   return (
     <Frame>
@@ -43,8 +71,11 @@ export default function PutawayScreen() {
         <View style={styles.topBar}>
           <Cubby size={28} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.topRef}>{lpn ?? "P-—"}</Text>
-            <Text style={styles.topMeta}>312 kg · 3 SKUs</Text>
+            <Text style={styles.topRef}>{p.lpn}</Text>
+            <Text style={styles.topMeta}>
+              {p.weightKg ? `${p.weightKg} kg · ` : ""}
+              {skuCount} SKU{skuCount === 1 ? "" : "s"} · {totalUnits} units
+            </Text>
           </View>
           <Pill tone="lilac" size="sm">
             PUTAWAY
@@ -55,39 +86,45 @@ export default function PutawayScreen() {
         <View style={styles.goto}>
           <View style={{ flex: 1 }}>
             <Text style={styles.kicker}>DROP AT</Text>
-            <Text style={styles.loc}>{PRIMARY.loc}</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 }}>
-              <View style={styles.confChip}>
-                <Text style={styles.confText}>BEST {PRIMARY.confidence}</Text>
+            <Text style={styles.loc}>{queueRow?.suggestedRack?.code ?? "?"}</Text>
+            {queueRow?.suggestedRack && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: 10,
+                  gap: 8,
+                }}
+              >
+                <View style={styles.confChip}>
+                  <Text style={styles.confText}>FIRST OPEN RACK</Text>
+                </View>
               </View>
-            </View>
-            <Text style={styles.reason}>{PRIMARY.reason}</Text>
+            )}
+            <Text style={styles.reason}>
+              {queueRow?.suggestedRack
+                ? `Currently at ${queueRow.locationCode ?? "dock"}.`
+                : "No rack available in this warehouse. Override manually."}
+            </Text>
           </View>
           <Text style={styles.arrow}>→</Text>
         </View>
 
-        {/* Alternatives */}
-        <Text style={styles.altLabel}>Alternatives</Text>
+        <Text style={styles.altLabel}>Pallet contents</Text>
         <View style={{ gap: 8 }}>
-          {ALTS.map((a) => (
-            <Pressable
-              key={a.loc}
-              style={({ pressed }) => [
-                styles.altRow,
-                pressed && { transform: [{ scale: 0.99 }] },
-              ]}
-            >
-              <Text style={styles.altLoc}>{a.loc}</Text>
-              <Text style={styles.altConf}>{a.confidence}</Text>
-              <Text style={styles.altReason}>{a.reason}</Text>
-            </Pressable>
-          ))}
+          {items.length === 0 ? (
+            <Text style={styles.emptyContents}>Empty pallet — no items recorded.</Text>
+          ) : (
+            items.map((it) => (
+              <View key={it.id} style={styles.altRow}>
+                <Text style={styles.altLoc}>{it.qty}</Text>
+                <Text style={styles.altReason}>
+                  {it.qtyUnit} · {it.lot ?? "no lot"}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
-
-        <Text style={styles.previewText}>
-          FLOOR MODE PREVIEW · mock suggestions · later phase wires
-          putaway.suggest + putaway.commit
-        </Text>
       </ScrollView>
 
       <View style={styles.bottomCta}>
@@ -206,14 +243,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: t.ink,
     letterSpacing: 0.5,
-    width: 110,
-  },
-  altConf: {
-    fontFamily: FONTS.mono,
-    fontSize: 14,
-    fontWeight: "800",
-    color: t.primary,
-    width: 36,
+    width: 60,
   },
   altReason: {
     flex: 1,
@@ -221,18 +251,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: t.body,
   },
+  emptyContents: {
+    fontFamily: FONTS.sans,
+    fontSize: 13,
+    color: t.mutedSoft,
+    paddingHorizontal: 4,
+  },
   bottomCta: {
     position: "absolute",
     left: 16,
     right: 16,
     bottom: 20,
-  },
-  previewText: {
-    fontFamily: FONTS.mono,
-    fontSize: 11,
-    color: t.mutedSoft,
-    letterSpacing: 0.4,
-    marginTop: 22,
-    textAlign: "center",
   },
 });

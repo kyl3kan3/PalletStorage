@@ -1,39 +1,76 @@
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useMemo } from "react";
 import { Frame } from "../../../src/components/Frame";
 import { Btn } from "../../../src/components/Btn";
 import { Pill } from "../../../src/components/Pill";
 import { Cubby } from "../../../src/components/Cubby";
-import { theme as t, FONTS, TYPE } from "../../../src/lib/theme";
+import { Skeleton } from "../../../src/components/Skeleton";
+import { EmptyState } from "../../../src/components/EmptyState";
+import { theme as t, FONTS } from "../../../src/lib/theme";
+import { trpc } from "../../../src/lib/trpc";
 
 /**
- * Pick run screen — one line at a time. Massive marigold "GO TO" card
- * with the location code in 64px mono, item card below, then the
- * SCAN TO CONFIRM strip. Per the handoff this is the floor staff's
- * primary loop — read location, walk, scan to confirm, repeat.
+ * Pick run screen — one line at a time. Param [ref] is the outbound
+ * order UUID (passed from the Today/Tasks queue).
  *
- * Mock data; later phase wires pick.next({ orderId }) +
- * pick.confirm({ orderId, lineId, qty, lot, locationCode }).
+ * Wires:
+ *   - outbound.byId → order header (reference, customer, shipBy)
+ *   - outbound.picksForOrder → pick rows w/ location, qty, pallet
+ *   - product.search → bulk SKU/name map for line.productId
+ *
+ * Renders the first incomplete pick as the GO-TO card. SCAN TO CONFIRM
+ * calls outbound.completePick.
  */
 
 export default function PickScreen() {
-  const { ref } = useLocalSearchParams<{ ref: string }>();
+  const { ref: id } = useLocalSearchParams<{ ref: string }>();
 
-  // Mock line data — line 13 of 22 in the current order.
-  const line = {
-    n: 13,
-    total: 22,
-    sku: "SKU-00211",
-    name: "Whole Tomatoes #10",
-    velocity: "B",
-    take: 12,
-    unit: "ea",
-    location: "A2-02-B",
-    steps: 32,
-    walkSec: 18,
-    lot: "LOT-2026-Q1",
-    expiry: "Apr 18",
-  };
+  const order = trpc.outbound.byId.useQuery(
+    { id: id ?? "" },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+  const picks = trpc.outbound.picksForOrder.useQuery(
+    { outboundOrderId: id ?? "" },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+  const products = trpc.product.search.useQuery({ q: "", limit: 500 });
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, { sku: string | null; name: string }>();
+    for (const p of products.data ?? []) m.set(p.id, { sku: p.sku, name: p.name });
+    return m;
+  }, [products.data]);
+
+  const allPicks = picks.data ?? [];
+  const completedPicks = allPicks.filter((p) => p.completedAt != null);
+  const nextPick = allPicks.find((p) => p.completedAt == null);
+
+  if (order.isLoading || picks.isLoading) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <Skeleton lines={5} rowHeight={80} />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  if (!order.data) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <EmptyState title="Order not found" />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  const { order: ord } = order.data;
+  const product = nextPick ? productMap.get(nextPick.productId) : null;
+  const shipMinsLeft = ord.shipBy
+    ? Math.round((new Date(ord.shipBy).getTime() - Date.now()) / 60_000)
+    : null;
 
   return (
     <Frame>
@@ -43,78 +80,94 @@ export default function PickScreen() {
           <Cubby size={28} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.topRef}>
-              {ref ?? "SO-—"} · LINE {line.n}/{line.total}
+              {ord.reference} · LINE {completedPicks.length + 1}/{allPicks.length || "—"}
             </Text>
-            <Text style={styles.topCustomer}>Northgate Foods</Text>
+            <Text style={styles.topCustomer}>{ord.customer ?? "—"}</Text>
           </View>
-          <Pill tone="coral" size="sm">
-            1H 12M
-          </Pill>
-        </View>
-
-        {/* Hero GO TO card */}
-        <View style={styles.goto}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.gotoKicker}>GO TO</Text>
-            <Text style={styles.gotoLoc}>{line.location}</Text>
-            <Text style={styles.gotoWalk}>
-              📍 {line.steps} steps · ~{line.walkSec}s
-            </Text>
-          </View>
-          <Text style={styles.gotoArrow}>→</Text>
-        </View>
-
-        {/* Item card */}
-        <View style={styles.item}>
-          <View style={styles.itemHeader}>
-            <Text style={styles.itemSku}>{line.sku}</Text>
-            <Pill tone="primary" size="sm">
-              {line.velocity}
+          {shipMinsLeft != null && shipMinsLeft >= 0 && (
+            <Pill tone={shipMinsLeft < 240 ? "coral" : "neutral"} size="sm">
+              {formatMinsLeft(shipMinsLeft)}
             </Pill>
-          </View>
-          <Text style={styles.itemName}>{line.name}</Text>
+          )}
+        </View>
 
-          <View style={styles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemMetaLabel}>TAKE</Text>
-              <Text style={styles.qty}>
-                {line.take} <Text style={styles.qtyUnit}>{line.unit}</Text>
+        {!nextPick ? (
+          <EmptyState
+            title={allPicks.length === 0 ? "No picks generated yet" : "All picks complete"}
+            hint={
+              allPicks.length === 0
+                ? "Go back to the manager screen and generate picks for this order."
+                : `${completedPicks.length} picks complete. Ready to pack.`
+            }
+          />
+        ) : (
+          <>
+            {/* Hero GO TO card */}
+            <View style={styles.goto}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.gotoKicker}>GO TO</Text>
+                <Text style={styles.gotoLoc}>{nextPick.fromLocationCode ?? "?"}</Text>
+                <Text style={styles.gotoWalk}>
+                  📍 LPN {nextPick.palletLpn ?? "—"}
+                </Text>
+              </View>
+              <Text style={styles.gotoArrow}>→</Text>
+            </View>
+
+            {/* Item card */}
+            <View style={styles.item}>
+              <View style={styles.itemHeader}>
+                <Text style={styles.itemSku}>{product?.sku ?? "—"}</Text>
+              </View>
+              <Text style={styles.itemName}>
+                {product?.name ?? `Product ${nextPick.productId.slice(0, 8)}`}
               </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemMetaLabel}>LOT</Text>
-              <Text style={styles.lot}>{line.lot}</Text>
-              <Text style={styles.itemMetaLabel}>EXPIRY</Text>
-              <Text style={styles.lot}>{line.expiry}</Text>
-            </View>
-          </View>
-        </View>
 
-        {/* Confirm strip */}
-        <View style={{ marginTop: 18 }}>
-          <Btn variant="light" size="lg" full>
-            SCAN TO CONFIRM
-          </Btn>
-          <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }}>
-            <Btn variant="ghost" size="md" style={{ flex: 1 }}>
-              SKIP
-            </Btn>
-            <Btn variant="ghost" size="md" style={{ flex: 1 }}>
-              SHORT
-            </Btn>
-            <Btn variant="ghost" size="md" style={{ flex: 1 }}>
-              SUB
-            </Btn>
-          </View>
-        </View>
+              <View style={styles.itemRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemMetaLabel}>TAKE</Text>
+                  <Text style={styles.qty}>
+                    {nextPick.qty} <Text style={styles.qtyUnit}>ea</Text>
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemMetaLabel}>SEQUENCE</Text>
+                  <Text style={styles.lot}>{nextPick.sequence}</Text>
+                  <Text style={styles.itemMetaLabel}>REMAINING</Text>
+                  <Text style={styles.lot}>{allPicks.length - completedPicks.length}</Text>
+                </View>
+              </View>
+            </View>
 
-        <Text style={styles.previewText}>
-          FLOOR MODE PREVIEW · mock data · later phase wires pick.next +
-          pick.confirm
-        </Text>
+            {/* Confirm strip */}
+            <View style={{ marginTop: 18 }}>
+              <Btn variant="light" size="lg" full>
+                SCAN TO CONFIRM
+              </Btn>
+              <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }}>
+                <Btn variant="ghost" size="md" style={{ flex: 1 }}>
+                  SKIP
+                </Btn>
+                <Btn variant="ghost" size="md" style={{ flex: 1 }}>
+                  SHORT
+                </Btn>
+                <Btn variant="ghost" size="md" style={{ flex: 1 }}>
+                  SUB
+                </Btn>
+              </View>
+            </View>
+          </>
+        )}
       </ScrollView>
     </Frame>
   );
+}
+
+function formatMinsLeft(mins: number): string {
+  if (mins < 60) return `${mins}M`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}H ${m.toString().padStart(2, "0")}M`;
 }
 
 const styles = StyleSheet.create({
@@ -245,13 +298,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 2,
     letterSpacing: 0.2,
-  },
-  previewText: {
-    fontFamily: FONTS.mono,
-    fontSize: 11,
-    color: t.mutedSoft,
-    letterSpacing: 0.4,
-    marginTop: 22,
-    textAlign: "center",
   },
 });

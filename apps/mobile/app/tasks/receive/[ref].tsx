@@ -1,48 +1,75 @@
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useMemo } from "react";
 import { Frame } from "../../../src/components/Frame";
 import { Btn } from "../../../src/components/Btn";
 import { Pill } from "../../../src/components/Pill";
 import { Cubby } from "../../../src/components/Cubby";
+import { Skeleton } from "../../../src/components/Skeleton";
+import { EmptyState } from "../../../src/components/EmptyState";
 import { theme as t, FONTS } from "../../../src/lib/theme";
+import { trpc } from "../../../src/lib/trpc";
 
 /**
- * Receive screen. Header with PO ref + dock + variance pill. Progress
- * card with split mint-matched / coral-short bar. Lines list with
- * status badges (✓ matched, ✗ short, number for todo, marigold for
- * active). Sticky marigold "SCAN LINE N" button at the bottom.
+ * Receive screen. Param [ref] is the inbound order UUID.
  *
- * Mock data; later phase wires order.inbound + order.inboundLines +
- * receive.line({ poId, lineId, qty, lot }).
+ * Wires:
+ *   - inbound.byId → order header + lines (productId, qtyExpected,
+ *     qtyReceived)
+ *   - product.search → bulk SKU/name lookup
+ *
+ * Progress card splits mint-matched vs coral-short. Sticky marigold
+ * "SCAN LINE N" button at the bottom points at the first not-yet-
+ * fully-received line.
  */
 
-type LineStatus = "todo" | "matched" | "short" | "active";
-
-interface Line {
-  n: number;
-  sku: string;
-  name: string;
-  expected: number;
-  received: number;
-  status: LineStatus;
-}
-
-const LINES: Line[] = [
-  { n: 1, sku: "SKU-00041", name: "Vanilla Extract 8oz", expected: 120, received: 120, status: "matched" },
-  { n: 2, sku: "SKU-00102", name: "Cane Sugar 50lb", expected: 40, received: 36, status: "short" },
-  { n: 3, sku: "SKU-00038", name: "Coffee Beans 5lb", expected: 30, received: 30, status: "matched" },
-  { n: 4, sku: "SKU-00211", name: "Whole Tomatoes #10", expected: 24, received: 0, status: "active" },
-  { n: 5, sku: "SKU-00150", name: "Olive Oil 1L", expected: 18, received: 0, status: "todo" },
-];
-
 export default function ReceiveScreen() {
-  const { ref } = useLocalSearchParams<{ ref: string }>();
-  const matched = LINES.filter((l) => l.status === "matched").length;
-  const total = LINES.length;
-  const variance = LINES.reduce((n, l) => n + (l.received - l.expected), 0);
-  const matchedPct = matched / total;
-  const shortPct = LINES.filter((l) => l.status === "short").length / total;
-  const nextLine = LINES.find((l) => l.status === "active" || l.status === "todo");
+  const { ref: id } = useLocalSearchParams<{ ref: string }>();
+
+  const detail = trpc.inbound.byId.useQuery(
+    { id: id ?? "" },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+  const products = trpc.product.search.useQuery({ q: "", limit: 500 });
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, { sku: string | null; name: string }>();
+    for (const p of products.data ?? []) m.set(p.id, { sku: p.sku, name: p.name });
+    return m;
+  }, [products.data]);
+
+  if (detail.isLoading) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <Skeleton lines={6} rowHeight={64} />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  if (!detail.data) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <EmptyState title="Order not found" />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  const { order, lines } = detail.data;
+  const matchedLines = lines.filter(
+    (l) => l.qtyReceived === l.qtyExpected && l.qtyReceived > 0,
+  ).length;
+  const shortLines = lines.filter(
+    (l) => l.qtyReceived > 0 && l.qtyReceived < l.qtyExpected,
+  ).length;
+  const total = lines.length;
+  const variance = lines.reduce((n, l) => n + (l.qtyReceived - l.qtyExpected), 0);
+  const matchedPct = total > 0 ? matchedLines / total : 0;
+  const shortPct = total > 0 ? shortLines / total : 0;
+  const nextLineIdx = lines.findIndex((l) => l.qtyReceived < l.qtyExpected);
 
   return (
     <Frame>
@@ -51,8 +78,8 @@ export default function ReceiveScreen() {
         <View style={styles.topBar}>
           <Cubby size={28} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.topRef}>{ref ?? "PO-—"} · D-01</Text>
-            <Text style={styles.topSupplier}>ACME Corp</Text>
+            <Text style={styles.topRef}>{order.reference}</Text>
+            <Text style={styles.topSupplier}>{order.supplier ?? "supplier —"}</Text>
           </View>
           {variance < 0 && (
             <Pill tone="coral" size="sm">{`${Math.abs(variance)} SHORT`}</Pill>
@@ -63,49 +90,64 @@ export default function ReceiveScreen() {
         <View style={styles.progress}>
           <View style={styles.progressLabels}>
             <Text style={styles.progressBig}>
-              {matched + LINES.filter((l) => l.status === "short").length} / {total}
+              {matchedLines + shortLines} / {total}
               <Text style={styles.progressBigUnit}> LINES</Text>
             </Text>
-            <Text style={styles.progressVar}>
+            <Text style={[styles.progressVar, variance < 0 && { color: t.coral }]}>
               VAR {variance > 0 ? "+" : ""}
               {variance} EA
             </Text>
           </View>
           <View style={styles.progressBar}>
-            <View
-              style={{
-                flex: matchedPct,
-                backgroundColor: t.mint,
-              }}
-            />
-            <View
-              style={{
-                flex: shortPct,
-                backgroundColor: t.coral,
-              }}
-            />
-            <View style={{ flex: 1 - matchedPct - shortPct }} />
+            <View style={{ flex: matchedPct, backgroundColor: t.mint }} />
+            <View style={{ flex: shortPct, backgroundColor: t.coral }} />
+            <View style={{ flex: Math.max(0, 1 - matchedPct - shortPct) }} />
           </View>
         </View>
 
         {/* Lines */}
-        <View style={{ marginTop: 16, gap: 8 }}>
-          {LINES.map((l) => (
-            <LineRow key={l.n} l={l} />
-          ))}
-        </View>
-
-        <Text style={styles.previewText}>
-          FLOOR MODE PREVIEW · mock data · later phase wires order.inbound +
-          receive.line
-        </Text>
+        {lines.length === 0 ? (
+          <View style={{ marginTop: 16 }}>
+            <EmptyState
+              title="No lines on this order"
+              hint="Add lines from the manager screen."
+            />
+          </View>
+        ) : (
+          <View style={{ marginTop: 16, gap: 8 }}>
+            {lines.map((l, i) => {
+              const product = productMap.get(l.productId);
+              const matched = l.qtyReceived === l.qtyExpected && l.qtyReceived > 0;
+              const short = l.qtyReceived > 0 && l.qtyReceived < l.qtyExpected;
+              const active = i === nextLineIdx;
+              const status: "matched" | "short" | "active" | "todo" = matched
+                ? "matched"
+                : short
+                  ? "short"
+                  : active
+                    ? "active"
+                    : "todo";
+              return (
+                <LineRow
+                  key={l.id}
+                  n={i + 1}
+                  sku={product?.sku ?? "—"}
+                  name={product?.name ?? `Product ${l.productId.slice(0, 8)}`}
+                  expected={l.qtyExpected}
+                  received={l.qtyReceived}
+                  status={status}
+                />
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
 
       {/* Sticky bottom CTA */}
-      {nextLine && (
+      {nextLineIdx >= 0 && (
         <View style={styles.bottomCta}>
           <Btn variant="primary" size="lg" full>
-            SCAN LINE {nextLine.n}
+            SCAN LINE {nextLineIdx + 1}
           </Btn>
         </View>
       )}
@@ -113,10 +155,26 @@ export default function ReceiveScreen() {
   );
 }
 
-function LineRow({ l }: { l: Line }) {
-  const badge = lineBadge(l.status, l.n);
-  const isShort = l.status === "short";
-  const isActive = l.status === "active";
+type LineStatus = "todo" | "matched" | "short" | "active";
+
+function LineRow({
+  n,
+  sku,
+  name,
+  expected,
+  received,
+  status,
+}: {
+  n: number;
+  sku: string;
+  name: string;
+  expected: number;
+  received: number;
+  status: LineStatus;
+}) {
+  const badge = lineBadge(status, n);
+  const isShort = status === "short";
+  const isActive = status === "active";
   return (
     <View
       style={[
@@ -125,28 +183,21 @@ function LineRow({ l }: { l: Line }) {
         isShort && { backgroundColor: "rgba(255,107,91,.08)" },
       ]}
     >
-      <View
-        style={[
-          styles.lineBadge,
-          { backgroundColor: badge.bg },
-        ]}
-      >
-        <Text style={[styles.lineBadgeText, { color: badge.fg }]}>
-          {badge.text}
-        </Text>
+      <View style={[styles.lineBadge, { backgroundColor: badge.bg }]}>
+        <Text style={[styles.lineBadgeText, { color: badge.fg }]}>{badge.text}</Text>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.lineSku}>{l.sku}</Text>
-        <Text style={styles.lineName}>{l.name}</Text>
+        <Text style={styles.lineSku}>{sku}</Text>
+        <Text style={styles.lineName}>{name}</Text>
       </View>
       <Text
         style={[
           styles.lineQty,
           isShort && { color: t.coral },
-          l.status === "matched" && { color: t.mint },
+          status === "matched" && { color: t.mint },
         ]}
       >
-        {l.received} / {l.expected}
+        {received} / {expected}
       </Text>
     </View>
   );
@@ -211,7 +262,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 13,
     fontWeight: "800",
-    color: t.coral,
+    color: t.muted,
     letterSpacing: 0.4,
   },
   progressBar: {
@@ -269,13 +320,5 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 20,
-  },
-  previewText: {
-    fontFamily: FONTS.mono,
-    fontSize: 11,
-    color: t.mutedSoft,
-    letterSpacing: 0.4,
-    marginTop: 22,
-    textAlign: "center",
   },
 });

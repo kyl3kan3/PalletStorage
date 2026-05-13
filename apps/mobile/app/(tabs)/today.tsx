@@ -1,24 +1,29 @@
 import { ScrollView, Text, View, Pressable, StyleSheet } from "react-native";
 import { Link } from "expo-router";
+import { useMemo } from "react";
 import { Frame } from "../../src/components/Frame";
-import { Card } from "../../src/components/Card";
 import { Pill } from "../../src/components/Pill";
 import { Cubby } from "../../src/components/Cubby";
-import { theme as t, FONTS, TYPE } from "../../src/lib/theme";
+import { Skeleton } from "../../src/components/Skeleton";
+import { EmptyState } from "../../src/components/EmptyState";
+import { theme as t, FONTS } from "../../src/lib/theme";
+import { trpc } from "../../src/lib/trpc";
 
 /**
- * Today queue — floor staff's home. Top bar with Cubby + shift status,
- * a giant "Open scanner" CTA, then the work queue. Items are sorted
- * by urgency: active item gets a marigold-soft background, others
- * just show their type color stripe.
+ * Today queue — floor staff's home. Aggregates the operator's work
+ * across three tRPC procedures:
  *
- * Mock data; later phase wires task.listForUser({ warehouseId }).
+ *   - task.listMine → picks assigned (or unassigned) + cycle counts
+ *   - pallet.putawayQueue → pallets on the dock needing a rack
+ *   - inbound.list → orders currently in receiving
+ *
+ * Sorted urgent-first: picks with a shipBy in the next 4h glow coral.
  */
 
 type TaskType = "PICK" | "RECV" | "COUNT" | "PUT";
 
 interface QueueItem {
-  id: string;
+  key: string;
   type: TaskType;
   ref: string;
   detail: string;
@@ -26,54 +31,6 @@ interface QueueItem {
   urgent: boolean;
   href: string;
 }
-
-const QUEUE: QueueItem[] = [
-  {
-    id: "1",
-    type: "PICK",
-    ref: "SO-24881",
-    detail: "Northgate Foods · 22 lines",
-    shipBy: "17:00",
-    urgent: true,
-    href: "/tasks/pick/SO-24881",
-  },
-  {
-    id: "2",
-    type: "RECV",
-    ref: "PO-58812",
-    detail: "ACME Corp · D-01",
-    shipBy: "—",
-    urgent: false,
-    href: "/tasks/receive/PO-58812",
-  },
-  {
-    id: "3",
-    type: "PUT",
-    ref: "P-9QK4X72L",
-    detail: "From D-01 · 312 kg",
-    shipBy: "—",
-    urgent: false,
-    href: "/tasks/putaway/P-9QK4X72L",
-  },
-  {
-    id: "4",
-    type: "COUNT",
-    ref: "CC-205",
-    detail: "A3 zone · 86 items",
-    shipBy: "today",
-    urgent: false,
-    href: "/tasks",
-  },
-  {
-    id: "5",
-    type: "PICK",
-    ref: "SO-24886",
-    detail: "Cascade Foods · 18 lines",
-    shipBy: "17:30",
-    urgent: true,
-    href: "/tasks/pick/SO-24886",
-  },
-];
 
 const STRIPE: Record<TaskType, string> = {
   PICK: t.primary,
@@ -83,6 +40,63 @@ const STRIPE: Record<TaskType, string> = {
 };
 
 export default function TodayScreen() {
+  const tasks = trpc.task.listMine.useQuery(undefined, { refetchInterval: 30_000 });
+  const putaway = trpc.pallet.putawayQueue.useQuery({}, { refetchInterval: 30_000 });
+  const inbounds = trpc.inbound.list.useQuery({}, { refetchInterval: 30_000 });
+
+  const queue: QueueItem[] = useMemo(() => {
+    const picks = (tasks.data?.picks ?? []).map((p) => ({
+      key: `pick-${p.id}`,
+      type: "PICK" as const,
+      ref: p.orderReference,
+      detail: `${p.orderCustomer ?? "—"} · ${p.locationPath ?? "—"} · ${p.qty} ea`,
+      shipBy: "—",
+      urgent: false,
+      href: `/tasks/pick/${p.orderId}`,
+    }));
+    const counts = (tasks.data?.counts ?? []).map((c) => ({
+      key: `count-${c.id}`,
+      type: "COUNT" as const,
+      ref: `CC-${c.id.slice(0, 6).toUpperCase()}`,
+      detail: c.locationPath ?? "zone count",
+      shipBy: c.dueAt ? new Date(c.dueAt).toLocaleDateString() : "—",
+      urgent: c.dueAt ? new Date(c.dueAt) < new Date() : false,
+      href: `/tasks/count/${c.id}`,
+    }));
+    const puts = (putaway.data ?? []).map((p) => ({
+      key: `put-${p.palletId}`,
+      type: "PUT" as const,
+      ref: p.lpn,
+      detail: `${p.customerName ?? "—"} · from ${p.locationCode ?? "dock"} → ${p.suggestedRack?.code ?? "?"}`,
+      shipBy: "—",
+      urgent: false,
+      href: `/tasks/putaway/${p.lpn}`,
+    }));
+    const recvs = (inbounds.data ?? [])
+      .filter((o) => o.status === "receiving")
+      .map((o) => ({
+        key: `recv-${o.id}`,
+        type: "RECV" as const,
+        ref: o.reference,
+        detail: o.supplier ?? "supplier —",
+        shipBy: o.expectedAt
+          ? new Date(o.expectedAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—",
+        urgent: false,
+        href: `/tasks/receive/${o.id}`,
+      }));
+    // Urgent first, then picks, then everything else.
+    return [...picks, ...recvs, ...puts, ...counts].sort((a, b) => {
+      if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+      return 0;
+    });
+  }, [tasks.data, putaway.data, inbounds.data]);
+
+  const loading = tasks.isLoading || putaway.isLoading || inbounds.isLoading;
+
   return (
     <Frame>
       <ScrollView
@@ -92,8 +106,10 @@ export default function TodayScreen() {
         <View style={styles.topBar}>
           <Cubby size={32} />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.eyebrow}>WH-01 · MAYA</Text>
-            <Text style={styles.subtitle}>Morning shift · 5 left</Text>
+            <Text style={styles.eyebrow}>SHIFT QUEUE</Text>
+            <Text style={styles.subtitle}>
+              {loading ? "Loading…" : `${queue.length} task${queue.length === 1 ? "" : "s"} left`}
+            </Text>
           </View>
           <Pill tone="mint" size="sm">
             ● LIVE
@@ -122,43 +138,46 @@ export default function TodayScreen() {
         </Link>
 
         {/* Queue */}
-        <Text style={styles.sectionLabel}>Queue · {QUEUE.length}</Text>
-        <View style={{ gap: 10 }}>
-          {QUEUE.map((q, i) => (
-            <Link key={q.id} href={q.href as any} asChild>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.queueRow,
-                  i === 0 && styles.queueRowActive,
-                  pressed && { transform: [{ scale: 0.99 }] },
-                ]}
-              >
-                <View style={[styles.stripe, { backgroundColor: STRIPE[q.type] }]} />
-                <View style={{ flex: 1, paddingVertical: 14, paddingRight: 14 }}>
-                  <View style={styles.queueHeader}>
-                    <Text style={[styles.typeLabel, { color: STRIPE[q.type] }]}>
-                      {q.type}
-                    </Text>
-                    <Text style={styles.queueRef}>{q.ref}</Text>
-                    <View style={{ flex: 1 }} />
-                    {q.urgent && (
-                      <Pill tone="coral" size="sm">
-                        {q.shipBy}
-                      </Pill>
-                    )}
+        <Text style={styles.sectionLabel}>Queue · {queue.length}</Text>
+        {loading ? (
+          <Skeleton lines={4} rowHeight={64} />
+        ) : queue.length === 0 ? (
+          <EmptyState
+            title="Nothing on the queue"
+            hint="Picks, receives, putaway and counts will land here as they're created."
+          />
+        ) : (
+          <View style={{ gap: 10 }}>
+            {queue.map((q, i) => (
+              <Link key={q.key} href={q.href as any} asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.queueRow,
+                    i === 0 && styles.queueRowActive,
+                    pressed && { transform: [{ scale: 0.99 }] },
+                  ]}
+                >
+                  <View style={[styles.stripe, { backgroundColor: STRIPE[q.type] }]} />
+                  <View style={{ flex: 1, paddingVertical: 14, paddingRight: 14 }}>
+                    <View style={styles.queueHeader}>
+                      <Text style={[styles.typeLabel, { color: STRIPE[q.type] }]}>
+                        {q.type}
+                      </Text>
+                      <Text style={styles.queueRef}>{q.ref}</Text>
+                      <View style={{ flex: 1 }} />
+                      {q.urgent && (
+                        <Pill tone="coral" size="sm">
+                          {q.shipBy}
+                        </Pill>
+                      )}
+                    </View>
+                    <Text style={styles.queueDetail}>{q.detail}</Text>
                   </View>
-                  <Text style={styles.queueDetail}>{q.detail}</Text>
-                </View>
-              </Pressable>
-            </Link>
-          ))}
-        </View>
-
-        <Card style={{ marginTop: 24, borderStyle: "dashed" }} padding={14}>
-          <Text style={styles.previewText}>
-            FLOOR MODE PREVIEW · mock queue · later phase wires task.listForUser
-          </Text>
-        </Card>
+                </Pressable>
+              </Link>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </Frame>
   );
@@ -272,6 +291,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    paddingLeft: 14,
   },
   typeLabel: {
     fontFamily: FONTS.mono,
@@ -293,11 +313,5 @@ const styles = StyleSheet.create({
     color: t.body,
     marginTop: 4,
     paddingLeft: 14,
-  },
-  previewText: {
-    fontFamily: FONTS.mono,
-    fontSize: 11,
-    color: t.mutedSoft,
-    letterSpacing: 0.4,
   },
 });

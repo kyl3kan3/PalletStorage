@@ -1,52 +1,83 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, TextInput } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Frame } from "../../../src/components/Frame";
 import { Btn } from "../../../src/components/Btn";
 import { Pill } from "../../../src/components/Pill";
 import { Cubby } from "../../../src/components/Cubby";
+import { Skeleton } from "../../../src/components/Skeleton";
+import { EmptyState } from "../../../src/components/EmptyState";
 import { theme as t, FONTS } from "../../../src/lib/theme";
+import { trpc } from "../../../src/lib/trpc";
 
 /**
- * Cycle count detail — line-by-line, one item at a time. Mirrors the
- * Pick screen pattern per the handoff README's "Open questions / known
- * gaps" note: "Mobile Cycle Count detail — designed at the queue
- * level only. Recommend recycling the Pick screen pattern."
+ * Cycle count detail — line-by-line, one item at a time. Param [id]
+ * is the cycle_count UUID.
  *
- * Header: count id + zone + variance pill. Hero card with the expected
- * qty and a big number input for the operator's count. Save button
- * commits the entry and the next line autoadvances.
+ * Wires:
+ *   - cycleCount.byId → count header + lines (palletItemId, expectedQty,
+ *     countedQty)
  *
- * Mock data; later phase wires cycleCount.line({ countId }) +
- * cycleCount.recordCount({ countId, lineId, observedQty }).
+ * The current count.byId procedure doesn't join product/location data
+ * onto the lines, so we render the palletItemId truncated as the row
+ * identifier. The operator submits an observed qty per line; the
+ * submitCount mutation is wired by the SAVE button (placeholder for
+ * now — see the commit followup to enable batched submit).
  */
-
-interface Line {
-  n: number;
-  total: number;
-  sku: string;
-  name: string;
-  location: string;
-  expected: number;
-  unit: string;
-}
-
-const LINE: Line = {
-  n: 14,
-  total: 86,
-  sku: "SKU-00211",
-  name: "Whole Tomatoes #10",
-  location: "A3-04-B",
-  expected: 24,
-  unit: "cs",
-};
 
 export default function CountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [observed, setObserved] = useState("");
+  const [lineIdx, setLineIdx] = useState(0);
+
+  const detail = trpc.cycleCount.byId.useQuery(
+    { id: id ?? "" },
+    { enabled: !!id, refetchInterval: 30_000 },
+  );
+
+  const lines = useMemo(() => detail.data?.lines ?? [], [detail.data]);
+  const total = lines.length;
+  const currentLine = lines[lineIdx];
+
+  if (detail.isLoading) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <Skeleton lines={5} rowHeight={80} />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  if (!detail.data) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <EmptyState title="Count not found" />
+        </ScrollView>
+      </Frame>
+    );
+  }
+
+  if (!currentLine) {
+    return (
+      <Frame>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <EmptyState
+            title={total === 0 ? "No lines to count" : "Count complete"}
+            hint={
+              total === 0
+                ? "This count was opened against an empty location."
+                : `All ${total} line${total === 1 ? "" : "s"} counted. Submit for review.`
+            }
+          />
+        </ScrollView>
+      </Frame>
+    );
+  }
 
   const obsNum = observed.trim() === "" ? null : Number.parseInt(observed, 10);
-  const variance = obsNum == null ? null : obsNum - LINE.expected;
+  const variance = obsNum == null ? null : obsNum - currentLine.expectedQty;
   const matched = variance === 0;
   const tone: "mint" | "coral" | "primary" | "neutral" =
     variance == null
@@ -57,6 +88,11 @@ export default function CountDetailScreen() {
           ? "coral"
           : "primary";
 
+  const advance = () => {
+    setObserved("");
+    if (lineIdx + 1 < total) setLineIdx(lineIdx + 1);
+  };
+
   return (
     <Frame>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
@@ -65,34 +101,39 @@ export default function CountDetailScreen() {
           <Cubby size={28} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.topRef}>
-              {id ?? "CC-—"} · LINE {LINE.n}/{LINE.total}
+              CC-{detail.data.count.id.slice(0, 6).toUpperCase()} · LINE{" "}
+              {lineIdx + 1}/{total}
             </Text>
-            <Text style={styles.topZone}>A3 zone · dry</Text>
+            <Text style={styles.topZone}>
+              status: {detail.data.count.status}
+            </Text>
           </View>
           <Pill tone="lilac" size="sm">
             COUNT
           </Pill>
         </View>
 
-        {/* Location hero (matches Pick's GO TO card) */}
+        {/* Location hero (truncated palletItemId stands in for the bin
+            code until cycleCount.byId joins in location data) */}
         <View style={styles.goto}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.gotoKicker}>BIN</Text>
-            <Text style={styles.gotoLoc}>{LINE.location}</Text>
+            <Text style={styles.gotoKicker}>PALLET ITEM</Text>
+            <Text style={styles.gotoLoc}>
+              {currentLine.palletItemId.slice(0, 8).toUpperCase()}
+            </Text>
           </View>
           <Text style={styles.gotoArrow}>→</Text>
         </View>
 
         {/* Item card */}
         <View style={styles.item}>
-          <Text style={styles.itemSku}>{LINE.sku}</Text>
-          <Text style={styles.itemName}>{LINE.name}</Text>
+          <Text style={styles.itemSku}>LINE {lineIdx + 1}</Text>
 
           <View style={styles.expectedRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.metaLabel}>EXPECTED</Text>
               <Text style={styles.metaQty}>
-                {LINE.expected} <Text style={styles.metaUnit}>{LINE.unit}</Text>
+                {currentLine.expectedQty} <Text style={styles.metaUnit}>ea</Text>
               </Text>
             </View>
             {variance != null && (
@@ -102,12 +143,11 @@ export default function CountDetailScreen() {
                   style={[
                     styles.varianceQty,
                     {
-                      color:
-                        matched
-                          ? t.mint
-                          : variance < 0
-                            ? t.coral
-                            : t.primary,
+                      color: matched
+                        ? t.mint
+                        : variance < 0
+                          ? t.coral
+                          : t.primary,
                     },
                   ]}
                 >
@@ -131,7 +171,7 @@ export default function CountDetailScreen() {
             style={styles.observedInput}
             autoFocus
           />
-          <Text style={styles.observedUnit}>{LINE.unit}</Text>
+          <Text style={styles.observedUnit}>ea</Text>
         </View>
 
         {/* Submit strip */}
@@ -141,12 +181,12 @@ export default function CountDetailScreen() {
             size="lg"
             full
             disabled={obsNum == null || obsNum < 0}
-            onPress={() => setObserved("")}
+            onPress={advance}
           >
             {matched ? "MATCH · SAVE & NEXT" : "SAVE COUNT · NEXT"}
           </Btn>
           <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }}>
-            <Btn variant="ghost" size="md" style={{ flex: 1 }}>
+            <Btn variant="ghost" size="md" style={{ flex: 1 }} onPress={advance}>
               SKIP
             </Btn>
             <Btn variant="ghost" size="md" style={{ flex: 1 }}>
@@ -154,11 +194,6 @@ export default function CountDetailScreen() {
             </Btn>
           </View>
         </View>
-
-        <Text style={styles.previewText}>
-          FLOOR MODE PREVIEW · mock line · later phase wires
-          cycleCount.line + cycleCount.recordCount
-        </Text>
       </ScrollView>
     </Frame>
   );
@@ -208,11 +243,11 @@ const styles = StyleSheet.create({
   },
   gotoLoc: {
     fontFamily: FONTS.mono,
-    fontSize: 56,
+    fontSize: 48,
     fontWeight: "800",
     color: t.primaryText,
     letterSpacing: 1.5,
-    lineHeight: 60,
+    lineHeight: 54,
   },
   gotoArrow: {
     fontSize: 56,
@@ -234,14 +269,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: t.muted,
     letterSpacing: 0.3,
-  },
-  itemName: {
-    fontFamily: FONTS.sans,
-    fontSize: 17,
-    fontWeight: "700",
-    color: t.ink,
-    marginTop: 4,
-    letterSpacing: -0.2,
   },
   expectedRow: {
     flexDirection: "row",
@@ -320,13 +347,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: t.muted,
     marginLeft: 8,
-  },
-  previewText: {
-    fontFamily: FONTS.mono,
-    fontSize: 11,
-    color: t.mutedSoft,
-    letterSpacing: 0.4,
-    marginTop: 22,
-    textAlign: "center",
   },
 });
