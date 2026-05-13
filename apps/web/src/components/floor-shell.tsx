@@ -101,6 +101,22 @@ export function FShell({
     setDrawerOpen(false);
   }, [pathname]);
 
+  // If the viewport grows past mobile while the drawer is open,
+  // reset state so it doesn't reappear when the user shrinks back.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  // Escape key closes the drawer for keyboard users.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
   // Lock body scroll while the drawer is open on mobile so the page
   // behind the backdrop doesn't scroll when the operator drags.
   useEffect(() => {
@@ -261,6 +277,9 @@ export function FShell({
           />
           <aside
             data-fshell-drawer
+            role="dialog"
+            aria-modal="true"
+            aria-label="Floor navigation"
             style={{
               position: "fixed",
               top: 0,
@@ -332,7 +351,13 @@ export function FShell({
               Workspace
             </div>
             {NAV.map((n) => (
-              <FloorNavLink key={n.key} item={n} active={activeKey === n.key} t={t} />
+              <FloorNavLink
+                key={n.key}
+                item={n}
+                active={activeKey === n.key}
+                t={t}
+                onNavigate={() => setDrawerOpen(false)}
+              />
             ))}
 
             <div
@@ -349,7 +374,13 @@ export function FShell({
               Admin
             </div>
             {ADMIN_NAV.map((n) => (
-              <FloorNavLink key={n.key} item={n} active={activeKey === n.key} t={t} />
+              <FloorNavLink
+                key={n.key}
+                item={n}
+                active={activeKey === n.key}
+                t={t}
+                onNavigate={() => setDrawerOpen(false)}
+              />
             ))}
 
             <div style={{ flex: 1 }} />
@@ -578,15 +609,20 @@ function FloorNavLink({
   item,
   active,
   t,
+  onNavigate,
 }: {
   item: NavItem;
   active: boolean;
   t: typeof ft;
+  /** Called on click so the drawer can close even when the user
+   * taps the already-active route. */
+  onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       style={{
         display: "flex",
         alignItems: "center",
