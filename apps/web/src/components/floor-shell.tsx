@@ -38,18 +38,28 @@ interface NavItem {
   badge?: number;
 }
 
-// Nav links route within the /floor preview tree so sidebar clicks
-// stay inside the new design. Each preview page is a thin re-skin of
-// the equivalent legacy /(dashboard) route.
+// Primary nav routes inside the /floor tree. The "Admin" section
+// below deep-links to legacy (dashboard) pages that don't have a
+// floor-mode equivalent yet (schedule, customers, reports, setup).
 const NAV: NavItem[] = [
   { key: "home", label: "Home", href: "/floor" as Route, icon: Ic.Home },
   { key: "operations", label: "Operations", href: "/floor/operations" as Route, icon: Ic.Chart },
-  { key: "inbound", label: "Inbound", href: "/floor/inbound" as Route, icon: Ic.Inbound, badge: 8 },
-  { key: "outbound", label: "Outbound", href: "/floor/outbound" as Route, icon: Ic.Outbound, badge: 34 },
+  { key: "inbound", label: "Inbound", href: "/floor/inbound" as Route, icon: Ic.Inbound },
+  { key: "outbound", label: "Outbound", href: "/floor/outbound" as Route, icon: Ic.Outbound },
   { key: "inventory", label: "Inventory", href: "/floor/inventory" as Route, icon: Ic.Scan },
   { key: "products", label: "Products", href: "/floor/products" as Route, icon: Ic.Boxes },
   { key: "warehouses", label: "Warehouses", href: "/floor/warehouses" as Route, icon: Ic.Warehouse },
-  { key: "counts", label: "Cycle counts", href: "/floor/counts" as Route, icon: Ic.Clipboard, badge: 4 },
+  { key: "counts", label: "Cycle counts", href: "/floor/counts" as Route, icon: Ic.Clipboard },
+];
+
+// Admin / setup links that still live under the legacy (dashboard)
+// shell. Clicking them leaves Floor mode and renders inside the
+// original Shell sidebar (no floor-mode redesign for these yet).
+const ADMIN_NAV: NavItem[] = [
+  { key: "schedule", label: "Schedule", href: "/schedule" as Route, icon: Ic.Calendar },
+  { key: "customers", label: "Customers", href: "/customers" as Route, icon: Ic.User },
+  { key: "reports", label: "Reports", href: "/reports" as Route, icon: Ic.Chart },
+  { key: "setup", label: "Setup", href: "/catalog" as Route, icon: Ic.Settings },
 ];
 
 export interface FShellTab {
@@ -87,7 +97,8 @@ export function FShell({
   // "home" entry (/floor) has the shortest href, so by sorting
   // longest-first it only matches when nothing more specific does.
   const autoActive =
-    NAV.slice()
+    [...NAV, ...ADMIN_NAV]
+      .slice()
       .sort((a, b) => b.href.length - a.href.length)
       .find((n) => pathname.startsWith(n.href as string))?.key;
   const activeKey = active ?? autoActive;
@@ -103,7 +114,7 @@ export function FShell({
         fontFamily: FONTS.sans,
       }}
     >
-      {/* ─── Sidebar ─────────────────────────────────── */}
+      {/* ─── Sidebar ─────────────────────────────── */}
       <aside
         style={{
           background: t.bgAlt,
@@ -179,64 +190,26 @@ export function FShell({
           Workspace
         </div>
 
-        {NAV.map((n) => {
-          const on = activeKey === n.key;
-          const Icon = n.icon;
-          return (
-            <Link
-              key={n.key}
-              href={n.href}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                padding: "9px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                background: on ? t.surfaceLift : "transparent",
-                color: on ? t.ink : t.body,
-                fontSize: 13,
-                fontWeight: on ? 700 : 500,
-                position: "relative",
-                letterSpacing: -0.1,
-                textDecoration: "none",
-              }}
-            >
-              {on && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: -14,
-                    top: 8,
-                    bottom: 8,
-                    width: 3,
-                    borderRadius: 2,
-                    background: t.primary,
-                    boxShadow: `0 0 12px ${t.primaryGlow}`,
-                  }}
-                />
-              )}
-              <Icon size={16} color={on ? t.primary : t.muted} />
-              <span style={{ flex: 1 }}>{n.label}</span>
-              {n.badge != null && (
-                <span
-                  style={{
-                    fontFamily: FONTS.mono,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: on ? t.primary : t.muted,
-                    background: on ? t.primarySoft : t.surface,
-                    padding: "2px 7px",
-                    borderRadius: 6,
-                    border: `1px solid ${on ? "rgba(255,178,62,.3)" : t.border}`,
-                  }}
-                >
-                  {n.badge}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+        {NAV.map((n) => (
+          <FloorNavLink key={n.key} item={n} active={activeKey === n.key} t={t} />
+        ))}
+
+        <div
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 9.5,
+            fontWeight: 700,
+            color: t.mutedSoft,
+            padding: "14px 10px 6px",
+            letterSpacing: 1.2,
+            textTransform: "uppercase",
+          }}
+        >
+          Admin
+        </div>
+        {ADMIN_NAV.map((n) => (
+          <FloorNavLink key={n.key} item={n} active={activeKey === n.key} t={t} />
+        ))}
 
         <div style={{ flex: 1 }} />
 
@@ -244,7 +217,7 @@ export function FShell({
         <FloorLiveStatus />
       </aside>
 
-      {/* ─── Main column ────────────────────────────────── */}
+      {/* ─── Main column ──────────────────────────── */}
       <main style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Top bar */}
         <div
@@ -430,6 +403,71 @@ export function FShell({
         <div style={{ flex: 1, padding: "0 28px 28px" }}>{children}</div>
       </main>
     </div>
+  );
+}
+
+function FloorNavLink({
+  item,
+  active,
+  t,
+}: {
+  item: NavItem;
+  active: boolean;
+  t: typeof ft;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 11,
+        padding: "9px 10px",
+        borderRadius: 10,
+        cursor: "pointer",
+        background: active ? t.surfaceLift : "transparent",
+        color: active ? t.ink : t.body,
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        position: "relative",
+        letterSpacing: -0.1,
+        textDecoration: "none",
+      }}
+    >
+      {active && (
+        <div
+          style={{
+            position: "absolute",
+            left: -14,
+            top: 8,
+            bottom: 8,
+            width: 3,
+            borderRadius: 2,
+            background: t.primary,
+            boxShadow: `0 0 12px ${t.primaryGlow}`,
+          }}
+        />
+      )}
+      <Icon size={16} color={active ? t.primary : t.muted} />
+      <span style={{ flex: 1 }}>{item.label}</span>
+      {item.badge != null && (
+        <span
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 10,
+            fontWeight: 700,
+            color: active ? t.primary : t.muted,
+            background: active ? t.primarySoft : t.surface,
+            padding: "2px 7px",
+            borderRadius: 6,
+            border: `1px solid ${active ? "rgba(255,178,62,.3)" : t.border}`,
+          }}
+        >
+          {item.badge}
+        </span>
+      )}
+    </Link>
   );
 }
 
