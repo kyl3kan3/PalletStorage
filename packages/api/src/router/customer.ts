@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
@@ -124,6 +124,20 @@ export const customerRouter = router({
             eq(schema.pallets.status, "stored"),
           ),
         );
+      // Historical pallets — anything that's been-and-gone (or scrapped).
+      // Surfaced as its own count so historical imports (which create
+      // pallets with status='shipped' for rows that had an outDate) don't
+      // feel like they vanished into a black hole on the customer page.
+      const [historicalCount] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.pallets)
+        .where(
+          and(
+            eq(schema.pallets.organizationId, orgId),
+            eq(schema.pallets.customerId, row.id),
+            inArray(schema.pallets.status, ["shipped", "damaged"]),
+          ),
+        );
       const [outboundCount] = await ctx.db
         .select({ n: sql<number>`count(*)::int` })
         .from(schema.outboundOrders)
@@ -146,6 +160,7 @@ export const customerRouter = router({
       return {
         customer: row,
         storedPallets: palletCount?.n ?? 0,
+        historicalPallets: historicalCount?.n ?? 0,
         outboundOrders: outboundCount?.n ?? 0,
         inboundOrders: inboundCount?.n ?? 0,
       };
