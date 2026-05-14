@@ -2,8 +2,9 @@ import { z } from "zod";
 import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { schema } from "@wms/db";
 import { generateLPN } from "@wms/core";
-import { router, tenantProcedure } from "../trpc";
+import { router, tenantProcedure, managerProcedure } from "../trpc";
 import { requireOrgId } from "./_helpers";
+import { logAudit } from "../audit";
 
 export const palletRouter = router({
   byLpn: tenantProcedure.input(z.object({ lpn: z.string() })).query(async ({ ctx, input }) => {
@@ -270,5 +271,46 @@ export const palletRouter = router({
 
         return { ok: true };
       });
+    }),
+
+  /**
+   * Hard-delete a pallet. Cascades to pallet_items, label_codes, and
+   * movements via FK ON DELETE CASCADE. Picks holding this pallet get
+   * pallet_id set NULL (the outbound line still exists; it just loses
+   * the inventory pointer). Manager-only because this destroys
+   * billing history — a pallet that lived a full receive→ship lifecycle
+   * disappears from the movement ledger after delete, so peak-pallet
+   * counts on past months can shift.
+   */
+  delete: managerProcedure
+    .input(z.object({ palletId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const orgId = await requireOrgId(ctx);
+      const [pallet] = await ctx.db
+        .select({ id: schema.pallets.id, lpn: schema.pallets.lpn, status: schema.pallets.status })
+        .from(schema.pallets)
+        .where(
+          and(
+            eq(schema.pallets.id, input.palletId),
+            eq(schema.pallets.organizationId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!pallet) throw new Error("Pallet not found");
+
+      await ctx.db
+        .delete(schema.pallets)
+        .where(eq(schema.pallets.id, pallet.id));
+
+      await logAudit(ctx.db, {
+        organizationId: orgId,
+        userClerkId: ctx.userId,
+        action: "pallet.delete",
+        entityType: "pallet",
+        entityId: pallet.id,
+        metadata: { lpn: pallet.lpn, status: pallet.status },
+      });
+
+      return { ok: true };
     }),
 });

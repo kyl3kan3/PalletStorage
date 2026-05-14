@@ -153,12 +153,13 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         data-collapse-grid
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(4, 1fr)",
           gap: 14,
           marginBottom: 20,
         }}
       >
         <StatBig t={t} label="Stored pallets" value={q.data?.storedPallets ?? "—"} tint="primary" />
+        <StatBig t={t} label="Historical pallets" value={q.data?.historicalPallets ?? "—"} tint="alt" />
         <StatBig t={t} label="Outbound orders" value={q.data?.outboundOrders ?? "—"} tint="mint" />
         <StatBig t={t} label="Inbound orders" value={q.data?.inboundOrders ?? "—"} />
       </div>

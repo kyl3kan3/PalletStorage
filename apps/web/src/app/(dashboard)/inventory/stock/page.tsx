@@ -6,6 +6,7 @@ import { trpc } from "~/lib/trpc";
 import { theme, FONTS } from "~/lib/theme";
 import { Btn, Card, PageTitle, Tag, TextField } from "~/components/kit";
 import { Ic } from "~/components/icons";
+import { useIsManager } from "~/lib/useRole";
 
 /**
  * Stock-on-hand view. Two tabs:
@@ -60,6 +61,13 @@ export default function StockPage() {
       utils.inventory.byProduct.invalidate();
     },
   });
+  const deletePallet = trpc.pallet.delete.useMutation({
+    onSuccess: () => {
+      utils.inventory.byPallet.invalidate();
+      utils.inventory.byProduct.invalidate();
+    },
+  });
+  const isManager = useIsManager();
   const byProduct = trpc.inventory.byProduct.useQuery(
     {
       q,
@@ -362,12 +370,12 @@ export default function StockPage() {
                   })
                 }
               />
-              <div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {(r.palletStatus === "received" ||
                   r.palletStatus === "in_transit") && (
                   warehouseId ? (
                     racks.data && racks.data.filter((l) => l.type === "rack").length > 0 ? (
-                      <div style={{ display: "flex", gap: 4 }}>
+                      <div style={{ display: "flex", gap: 4, flex: 1, minWidth: 0 }}>
                         <select
                           value={putawayChoice[r.palletId] ?? ""}
                           onChange={(e) =>
@@ -429,6 +437,27 @@ export default function StockPage() {
                       filter to a warehouse
                     </span>
                   )
+                )}
+                {isManager && (
+                  <Btn
+                    t={t}
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    icon={Ic.X}
+                    disabled={deletePallet.isPending}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Delete pallet ${r.palletLpn}? This removes the pallet, its items, label, and movement history — it cannot be undone. Past billing reports that included this pallet will recompute.`,
+                        )
+                      )
+                        return;
+                      deletePallet.mutate({ palletId: r.palletId });
+                    }}
+                  >
+                    Delete
+                  </Btn>
                 )}
               </div>
             </div>
