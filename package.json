@@ -24,10 +24,18 @@
   "pnpm": {
     "overrides": {
       "@types/react": "^19.0.0",
-      "@types/react-dom": "^19.0.0"
+      "@types/react-dom": "^19.0.0",
+      "next>sharp": "0.35.5"
     },
     "peerDependencyRules": {
-      "ignoreMissing": ["react", "react-dom", "@types/react", "@types/react-dom", "utf-8-validate", "expo-linking"]
+      "ignoreMissing": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom",
+        "utf-8-validate",
+        "expo-linking"
+      ]
     }
   }
 }
